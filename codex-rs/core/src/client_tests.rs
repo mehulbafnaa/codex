@@ -69,6 +69,25 @@ fn test_model_client_with_parent(
     parent_thread_id: Option<ThreadId>,
 ) -> ModelClient {
     let provider = create_oss_provider_with_base_url("https://example.com/v1", WireApi::Responses);
+    test_model_client_with_provider_and_parent(provider, session_source, parent_thread_id)
+}
+
+fn test_model_client_with_provider(
+    provider: ModelProviderInfo,
+    session_source: SessionSource,
+) -> ModelClient {
+    test_model_client_with_provider_and_parent(
+        provider,
+        session_source,
+        /*parent_thread_id*/ None,
+    )
+}
+
+fn test_model_client_with_provider_and_parent(
+    provider: ModelProviderInfo,
+    session_source: SessionSource,
+    parent_thread_id: Option<ThreadId>,
+) -> ModelClient {
     let thread_id = ThreadId::new();
     ModelClient::new(
         /*auth_manager*/ None,
@@ -84,6 +103,57 @@ fn test_model_client_with_parent(
         /*beta_features_header*/ None,
         /*attestation_provider*/ None,
     )
+}
+
+#[test]
+fn response_item_ids_are_limited_to_openai_and_azure() {
+    let openai_client = test_model_client_with_provider(
+        ModelProviderInfo::create_openai_provider(Some("https://example.com/v1".to_string())),
+        SessionSource::Exec,
+    );
+    let openai_provider = openai_client
+        .state
+        .provider
+        .info()
+        .to_api_provider(None)
+        .expect("openai provider");
+    assert!(
+        openai_client
+            .new_session()
+            .should_include_response_item_ids(&openai_provider)
+    );
+
+    let azure_client = test_model_client_with_provider(
+        ModelProviderInfo {
+            name: "azure".to_string(),
+            ..create_oss_provider_with_base_url("https://example.com/v1", WireApi::Responses)
+        },
+        SessionSource::Exec,
+    );
+    let azure_provider = azure_client
+        .state
+        .provider
+        .info()
+        .to_api_provider(None)
+        .expect("azure provider");
+    assert!(
+        azure_client
+            .new_session()
+            .should_include_response_item_ids(&azure_provider)
+    );
+
+    let custom_client = test_model_client(SessionSource::Exec);
+    let custom_provider = custom_client
+        .state
+        .provider
+        .info()
+        .to_api_provider(None)
+        .expect("custom provider");
+    assert!(
+        !custom_client
+            .new_session()
+            .should_include_response_item_ids(&custom_provider)
+    );
 }
 
 fn test_model_info() -> ModelInfo {

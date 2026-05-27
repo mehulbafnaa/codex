@@ -450,6 +450,7 @@ async fn azure_default_store_attaches_ids_and_headers() -> Result<()> {
                 extra_headers,
                 compression: Compression::None,
                 turn_state: None,
+                include_item_ids: false,
             },
         )
         .await?;
@@ -494,6 +495,65 @@ async fn azure_default_store_attaches_ids_and_headers() -> Result<()> {
         .and_then(|item| item.get("id"))
         .and_then(|id| id.as_str());
     assert_eq!(input_id, Some("msg_1"));
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn response_item_ids_require_explicit_request_option() -> Result<()> {
+    let state = RecordingState::default();
+    let transport = RecordingTransport::new(state.clone());
+    let client = ResponsesClient::new(transport, provider("openai"), Arc::new(NoAuth));
+    let request = ResponsesApiRequest {
+        model: "gpt-test".into(),
+        instructions: "Say hi".into(),
+        input: vec![ResponseItem::Message {
+            id: Some("msg_1".into()),
+            role: "user".into(),
+            content: vec![ContentItem::InputText { text: "hi".into() }],
+            phase: None,
+        }],
+        tools: Vec::new(),
+        tool_choice: "auto".into(),
+        parallel_tool_calls: false,
+        reasoning: None,
+        store: false,
+        stream: true,
+        include: Vec::new(),
+        service_tier: None,
+        prompt_cache_key: None,
+        text: None,
+        client_metadata: None,
+    };
+
+    let _stream = client
+        .stream_request(request.clone(), ResponsesOptions::default())
+        .await?;
+    let _stream = client
+        .stream_request(
+            request,
+            ResponsesOptions {
+                include_item_ids: true,
+                ..Default::default()
+            },
+        )
+        .await?;
+
+    let requests = state.take_stream_requests();
+    assert_eq!(requests.len(), 2);
+    let input_id = |request: &Request| {
+        request
+            .body
+            .as_ref()
+            .and_then(RequestBody::json)
+            .and_then(|body| body.get("input"))
+            .and_then(|input| input.get(0))
+            .and_then(|item| item.get("id"))
+            .and_then(serde_json::Value::as_str)
+            .map(str::to_string)
+    };
+    assert_eq!(input_id(&requests[0]), None);
+    assert_eq!(input_id(&requests[1]), Some("msg_1".to_string()));
 
     Ok(())
 }

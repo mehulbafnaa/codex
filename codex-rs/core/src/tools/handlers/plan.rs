@@ -35,6 +35,7 @@ impl ToolOutput for PlanToolOutput {
         output.success = Some(true);
 
         ResponseInputItem::FunctionCallOutput {
+            id: None,
             call_id: call_id.to_string(),
             output,
         }

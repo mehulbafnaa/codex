@@ -42,6 +42,7 @@ use crate::models::ResponseInputItem;
 use crate::models::ResponseItem;
 use crate::models::SandboxEnforcement;
 use crate::models::WebSearchAction;
+use crate::models::attach_response_item_ids;
 use crate::num_format::format_with_separators;
 use crate::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use crate::parse_command::ParsedCommand;
@@ -712,6 +713,7 @@ impl InterAgentCommunication {
 
     pub fn to_response_input_item(&self) -> ResponseInputItem {
         ResponseInputItem::Message {
+            id: None,
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: serde_json::to_string(self).unwrap_or_default(),
@@ -2851,6 +2853,52 @@ pub enum RolloutItem {
     EventMsg(EventMsg),
 }
 
+impl RolloutItem {
+    pub fn with_stable_response_item_ids(self) -> Self {
+        match self {
+            Self::ResponseItem(item) => Self::ResponseItem(item.with_stable_id()),
+            Self::Compacted(mut compacted) => {
+                if let Some(replacement_history) = compacted.replacement_history.take() {
+                    compacted.replacement_history = Some(
+                        replacement_history
+                            .into_iter()
+                            .map(ResponseItem::with_stable_id)
+                            .collect(),
+                    );
+                }
+                Self::Compacted(compacted)
+            }
+            Self::SessionMeta(_) | Self::TurnContext(_) | Self::EventMsg(_) => self,
+        }
+    }
+
+    pub fn attach_response_item_ids_to_json(&self, value: &mut Value) {
+        let Some(payload) = value.get_mut("payload") else {
+            return;
+        };
+
+        match self {
+            Self::ResponseItem(item) => item.attach_id_to_json(payload),
+            Self::Compacted(CompactedItem {
+                replacement_history: Some(items),
+                ..
+            }) => {
+                let Some(Value::Array(values)) = payload.get_mut("replacement_history") else {
+                    return;
+                };
+                attach_response_item_ids(values, items);
+            }
+            Self::SessionMeta(_)
+            | Self::Compacted(CompactedItem {
+                replacement_history: None,
+                ..
+            })
+            | Self::TurnContext(_)
+            | Self::EventMsg(_) => {}
+        }
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, JsonSchema, TS)]
 pub struct CompactedItem {
     pub message: String,
@@ -4069,6 +4117,7 @@ mod tests {
         assert_eq!(
             communication.to_response_input_item(),
             ResponseInputItem::Message {
+                id: None,
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
                     text: serde_json::to_string(&communication).expect("serialize communication"),

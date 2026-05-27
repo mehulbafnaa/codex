@@ -115,6 +115,7 @@ impl ToolOutput for JsonToolOutput {
 
         if matches!(payload, ToolPayload::Custom { .. }) {
             return ResponseInputItem::CustomToolCallOutput {
+                id: None,
                 call_id: call_id.to_string(),
                 name: None,
                 output,
@@ -122,6 +123,7 @@ impl ToolOutput for JsonToolOutput {
         }
 
         ResponseInputItem::FunctionCallOutput {
+            id: None,
             call_id: call_id.to_string(),
             output,
         }
@@ -149,6 +151,7 @@ impl ToolOutput for codex_protocol::mcp::CallToolResult {
 
     fn to_response_item(&self, call_id: &str, _payload: &ToolPayload) -> ResponseInputItem {
         ResponseInputItem::McpToolCallOutput {
+            id: None,
             call_id: call_id.to_string(),
             output: self.clone(),
         }

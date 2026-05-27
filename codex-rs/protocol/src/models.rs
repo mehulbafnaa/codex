@@ -9,7 +9,9 @@ use serde::Deserialize;
 use serde::Deserializer;
 use serde::Serialize;
 use serde::ser::Serializer;
+use serde_json::Value;
 use ts_rs::TS;
+use uuid::Uuid;
 
 use crate::permissions::FileSystemAccessMode;
 use crate::permissions::FileSystemPath;
@@ -664,6 +666,9 @@ impl From<&FileSystemPermissions> for FileSystemSandboxPolicy {
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum ResponseInputItem {
     Message {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        id: Option<String>,
         role: String,
         content: Vec<ContentItem>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -671,16 +676,25 @@ pub enum ResponseInputItem {
         phase: Option<MessagePhase>,
     },
     FunctionCallOutput {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        id: Option<String>,
         call_id: String,
         #[ts(as = "FunctionCallOutputBody")]
         #[schemars(with = "FunctionCallOutputBody")]
         output: FunctionCallOutputPayload,
     },
     McpToolCallOutput {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        id: Option<String>,
         call_id: String,
         output: CallToolResult,
     },
     CustomToolCallOutput {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        id: Option<String>,
         call_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -690,6 +704,9 @@ pub enum ResponseInputItem {
         output: FunctionCallOutputPayload,
     },
     ToolSearchOutput {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        #[ts(optional)]
+        id: Option<String>,
         call_id: String,
         status: String,
         execution: String,
@@ -811,6 +828,10 @@ pub enum ResponseItem {
     //   - an array of structured content items (`content_items`)
     // We keep this behavior centralized in `FunctionCallOutputPayload`.
     FunctionCallOutput {
+        #[serde(default, skip_serializing)]
+        #[ts(skip)]
+        #[schemars(skip)]
+        id: Option<String>,
         call_id: String,
         #[ts(as = "FunctionCallOutputBody")]
         #[schemars(with = "FunctionCallOutputBody")]
@@ -832,6 +853,10 @@ pub enum ResponseItem {
     // `function_call_output.output` so freeform tools can return either plain
     // text or structured content items.
     CustomToolCallOutput {
+        #[serde(default, skip_serializing)]
+        #[ts(skip)]
+        #[schemars(skip)]
+        id: Option<String>,
         call_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
@@ -841,6 +866,10 @@ pub enum ResponseItem {
         output: FunctionCallOutputPayload,
     },
     ToolSearchOutput {
+        #[serde(default, skip_serializing)]
+        #[ts(skip)]
+        #[schemars(skip)]
+        id: Option<String>,
         call_id: Option<String>,
         status: String,
         execution: String,
@@ -885,6 +914,10 @@ pub enum ResponseItem {
     },
     #[serde(alias = "compaction_summary")]
     Compaction {
+        #[serde(default, skip_serializing)]
+        #[ts(skip)]
+        #[schemars(skip)]
+        id: Option<String>,
         encrypted_content: String,
     },
     CompactionTrigger,
@@ -897,11 +930,302 @@ pub enum ResponseItem {
     Other,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ResponseItemIdKind {
+    Message,
+    Reasoning,
+    LocalShellCall,
+    FunctionCall,
+    ToolSearchCall,
+    FunctionCallOutput,
+    CustomToolCall,
+    CustomToolCallOutput,
+    ToolSearchOutput,
+    WebSearchCall,
+    ImageGenerationCall,
+    Compaction,
+}
+
+impl ResponseItemIdKind {
+    fn prefix(self) -> &'static str {
+        match self {
+            Self::Message => "msg",
+            Self::Reasoning => "rs",
+            Self::LocalShellCall => "sh",
+            Self::FunctionCall => "fc",
+            Self::ToolSearchCall => "tsc",
+            Self::FunctionCallOutput => "fco",
+            Self::CustomToolCall => "ctc",
+            Self::CustomToolCallOutput => "ctco",
+            Self::ToolSearchOutput => "tso",
+            Self::WebSearchCall => "ws",
+            Self::ImageGenerationCall => "ig",
+            Self::Compaction => "cmp",
+        }
+    }
+}
+
+pub fn new_response_item_id(kind: ResponseItemIdKind) -> String {
+    format!("{}_{}", kind.prefix(), Uuid::new_v4().simple())
+}
+
+fn stable_optional_response_item_id(
+    id: Option<String>,
+    kind: ResponseItemIdKind,
+) -> Option<String> {
+    Some(
+        id.filter(|id| !id.is_empty())
+            .unwrap_or_else(|| new_response_item_id(kind)),
+    )
+}
+
+fn stable_response_item_id(id: String, kind: ResponseItemIdKind) -> String {
+    if id.is_empty() {
+        new_response_item_id(kind)
+    } else {
+        id
+    }
+}
+
+impl ResponseInputItem {
+    pub fn with_stable_id(self) -> Self {
+        match self {
+            Self::Message {
+                id,
+                role,
+                content,
+                phase,
+            } => Self::Message {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::Message),
+                role,
+                content,
+                phase,
+            },
+            Self::FunctionCallOutput {
+                id,
+                call_id,
+                output,
+            } => Self::FunctionCallOutput {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCallOutput),
+                call_id,
+                output,
+            },
+            Self::McpToolCallOutput {
+                id,
+                call_id,
+                output,
+            } => Self::McpToolCallOutput {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCallOutput),
+                call_id,
+                output,
+            },
+            Self::CustomToolCallOutput {
+                id,
+                call_id,
+                name,
+                output,
+            } => Self::CustomToolCallOutput {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::CustomToolCallOutput),
+                call_id,
+                name,
+                output,
+            },
+            Self::ToolSearchOutput {
+                id,
+                call_id,
+                status,
+                execution,
+                tools,
+            } => Self::ToolSearchOutput {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::ToolSearchOutput),
+                call_id,
+                status,
+                execution,
+                tools,
+            },
+        }
+    }
+}
+
 impl ResponseItem {
+    pub fn with_stable_id(self) -> Self {
+        match self {
+            Self::Message {
+                id,
+                role,
+                content,
+                phase,
+            } => Self::Message {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::Message),
+                role,
+                content,
+                phase,
+            },
+            Self::Reasoning {
+                id,
+                summary,
+                content,
+                encrypted_content,
+            } => Self::Reasoning {
+                id: stable_response_item_id(id, ResponseItemIdKind::Reasoning),
+                summary,
+                content,
+                encrypted_content,
+            },
+            Self::LocalShellCall {
+                id,
+                call_id,
+                status,
+                action,
+            } => Self::LocalShellCall {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::LocalShellCall),
+                call_id,
+                status,
+                action,
+            },
+            Self::FunctionCall {
+                id,
+                name,
+                namespace,
+                arguments,
+                call_id,
+            } => Self::FunctionCall {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCall),
+                name,
+                namespace,
+                arguments,
+                call_id,
+            },
+            Self::ToolSearchCall {
+                id,
+                call_id,
+                status,
+                execution,
+                arguments,
+            } => Self::ToolSearchCall {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::ToolSearchCall),
+                call_id,
+                status,
+                execution,
+                arguments,
+            },
+            Self::FunctionCallOutput {
+                id,
+                call_id,
+                output,
+            } => Self::FunctionCallOutput {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCallOutput),
+                call_id,
+                output,
+            },
+            Self::CustomToolCall {
+                id,
+                status,
+                call_id,
+                name,
+                input,
+            } => Self::CustomToolCall {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::CustomToolCall),
+                status,
+                call_id,
+                name,
+                input,
+            },
+            Self::CustomToolCallOutput {
+                id,
+                call_id,
+                name,
+                output,
+            } => Self::CustomToolCallOutput {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::CustomToolCallOutput),
+                call_id,
+                name,
+                output,
+            },
+            Self::ToolSearchOutput {
+                id,
+                call_id,
+                status,
+                execution,
+                tools,
+            } => Self::ToolSearchOutput {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::ToolSearchOutput),
+                call_id,
+                status,
+                execution,
+                tools,
+            },
+            Self::WebSearchCall { id, status, action } => Self::WebSearchCall {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::WebSearchCall),
+                status,
+                action,
+            },
+            Self::ImageGenerationCall {
+                id,
+                status,
+                revised_prompt,
+                result,
+            } => Self::ImageGenerationCall {
+                id: stable_response_item_id(id, ResponseItemIdKind::ImageGenerationCall),
+                status,
+                revised_prompt,
+                result,
+            },
+            Self::Compaction {
+                id,
+                encrypted_content,
+            } => Self::Compaction {
+                id: stable_optional_response_item_id(id, ResponseItemIdKind::Compaction),
+                encrypted_content,
+            },
+            Self::CompactionTrigger | Self::ContextCompaction { .. } | Self::Other => self,
+        }
+    }
+
+    pub fn id(&self) -> Option<&str> {
+        match self {
+            Self::Message { id, .. }
+            | Self::LocalShellCall { id, .. }
+            | Self::FunctionCall { id, .. }
+            | Self::ToolSearchCall { id, .. }
+            | Self::FunctionCallOutput { id, .. }
+            | Self::CustomToolCall { id, .. }
+            | Self::CustomToolCallOutput { id, .. }
+            | Self::ToolSearchOutput { id, .. }
+            | Self::WebSearchCall { id, .. }
+            | Self::Compaction { id, .. } => id.as_deref(),
+            Self::Reasoning { id, .. } | Self::ImageGenerationCall { id, .. } => Some(id),
+            Self::CompactionTrigger | Self::ContextCompaction { .. } | Self::Other => None,
+        }
+    }
+
+    pub fn attach_id_to_json(&self, value: &mut Value) {
+        let Some(id) = self.id().filter(|id| !id.is_empty()) else {
+            return;
+        };
+        let Some(obj) = value.as_object_mut() else {
+            return;
+        };
+        obj.insert("id".to_string(), Value::String(id.to_string()));
+    }
+
     /// Returns whether this item is an ordinary user-role message.
     pub fn is_user_message(&self) -> bool {
         matches!(self, Self::Message { role, .. } if role == "user")
     }
+}
+
+pub fn attach_response_item_ids(values: &mut [Value], items: &[ResponseItem]) {
+    for (value, item) in values.iter_mut().zip(items) {
+        item.attach_id_to_json(value);
+    }
+}
+
+pub fn attach_response_item_ids_to_input(payload_json: &mut Value, items: &[ResponseItem]) {
+    let Some(Value::Array(values)) = payload_json.get_mut("input") else {
+        return;
+    };
+    attach_response_item_ids(values, items);
 }
 
 pub const BASE_INSTRUCTIONS_DEFAULT: &str = include_str!("prompts/base_instructions/default.md");
@@ -1114,39 +1438,58 @@ pub fn local_image_content_items_with_label_number(
 
 impl From<ResponseInputItem> for ResponseItem {
     fn from(item: ResponseInputItem) -> Self {
-        match item {
+        match item.with_stable_id() {
             ResponseInputItem::Message {
+                id,
                 role,
                 content,
                 phase,
             } => Self::Message {
                 role,
                 content,
-                id: None,
+                id,
                 phase,
             },
-            ResponseInputItem::FunctionCallOutput { call_id, output } => {
-                Self::FunctionCallOutput { call_id, output }
-            }
-            ResponseInputItem::McpToolCallOutput { call_id, output } => {
+            ResponseInputItem::FunctionCallOutput {
+                id,
+                call_id,
+                output,
+            } => Self::FunctionCallOutput {
+                id,
+                call_id,
+                output,
+            },
+            ResponseInputItem::McpToolCallOutput {
+                id,
+                call_id,
+                output,
+            } => {
                 let output = output.into_function_call_output_payload();
-                Self::FunctionCallOutput { call_id, output }
+                Self::FunctionCallOutput {
+                    id,
+                    call_id,
+                    output,
+                }
             }
             ResponseInputItem::CustomToolCallOutput {
+                id,
                 call_id,
                 name,
                 output,
             } => Self::CustomToolCallOutput {
+                id,
                 call_id,
                 name,
                 output,
             },
             ResponseInputItem::ToolSearchOutput {
+                id,
                 call_id,
                 status,
                 execution,
                 tools,
             } => Self::ToolSearchOutput {
+                id,
                 call_id: Some(call_id),
                 status,
                 execution,
@@ -1226,6 +1569,7 @@ impl From<Vec<UserInput>> for ResponseInputItem {
     fn from(items: Vec<UserInput>) -> Self {
         let mut image_index = 0;
         Self::Message {
+            id: None,
             role: "user".to_string(),
             content: items
                 .into_iter()
@@ -1654,6 +1998,38 @@ mod tests {
     #[test]
     fn response_input_message_conversion_preserves_phase() {
         let item = ResponseItem::from(ResponseInputItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: vec![ContentItem::OutputText {
+                text: "still working".to_string(),
+            }],
+            phase: Some(MessagePhase::Commentary),
+        });
+
+        let ResponseItem::Message {
+            id: Some(id),
+            role,
+            content,
+            phase,
+        } = item
+        else {
+            panic!("expected assistant message with generated id");
+        };
+        assert!(id.starts_with("msg_"));
+        assert_eq!(role, "assistant");
+        assert_eq!(
+            content,
+            vec![ContentItem::OutputText {
+                text: "still working".to_string(),
+            }]
+        );
+        assert_eq!(phase, Some(MessagePhase::Commentary));
+    }
+
+    #[test]
+    fn response_input_message_conversion_preserves_existing_id() {
+        let item = ResponseItem::from(ResponseInputItem::Message {
+            id: Some("msg_existing".to_string()),
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: "still working".to_string(),
@@ -1664,7 +2040,7 @@ mod tests {
         assert_eq!(
             item,
             ResponseItem::Message {
-                id: None,
+                id: Some("msg_existing".to_string()),
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
                     text: "still working".to_string(),
@@ -1672,6 +2048,185 @@ mod tests {
                 phase: Some(MessagePhase::Commentary),
             }
         );
+    }
+
+    #[test]
+    fn response_input_tool_output_conversion_preserves_existing_id() {
+        let item = ResponseItem::from(ResponseInputItem::FunctionCallOutput {
+            id: Some("fco_existing".to_string()),
+            call_id: "call_1".to_string(),
+            output: FunctionCallOutputPayload::from_text("ok".to_string()),
+        });
+
+        assert_eq!(
+            item,
+            ResponseItem::FunctionCallOutput {
+                id: Some("fco_existing".to_string()),
+                call_id: "call_1".to_string(),
+                output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            }
+        );
+    }
+
+    #[test]
+    fn new_response_item_ids_use_responses_api_prefixes() {
+        for (kind, prefix) in [
+            (ResponseItemIdKind::Message, "msg"),
+            (ResponseItemIdKind::Reasoning, "rs"),
+            (ResponseItemIdKind::LocalShellCall, "sh"),
+            (ResponseItemIdKind::FunctionCall, "fc"),
+            (ResponseItemIdKind::ToolSearchCall, "tsc"),
+            (ResponseItemIdKind::FunctionCallOutput, "fco"),
+            (ResponseItemIdKind::CustomToolCall, "ctc"),
+            (ResponseItemIdKind::CustomToolCallOutput, "ctco"),
+            (ResponseItemIdKind::ToolSearchOutput, "tso"),
+            (ResponseItemIdKind::WebSearchCall, "ws"),
+            (ResponseItemIdKind::ImageGenerationCall, "ig"),
+            (ResponseItemIdKind::Compaction, "cmp"),
+        ] {
+            let id = new_response_item_id(kind);
+            assert!(id.starts_with(&format!("{prefix}_")), "unexpected id: {id}");
+        }
+    }
+
+    #[test]
+    fn stable_response_item_ids_replace_empty_ids() {
+        let ResponseItem::Message { id: Some(id), .. } = ResponseItem::Message {
+            id: Some(String::new()),
+            role: "user".to_string(),
+            content: Vec::new(),
+            phase: None,
+        }
+        .with_stable_id() else {
+            panic!("expected message id");
+        };
+
+        assert!(id.starts_with("msg_"));
+    }
+
+    #[test]
+    fn attaches_response_item_ids_to_input_json() {
+        let items = vec![
+            ResponseItem::Message {
+                id: Some("msg_1".to_string()),
+                role: "user".to_string(),
+                content: vec![ContentItem::InputText {
+                    text: "hello".to_string(),
+                }],
+                phase: None,
+            },
+            ResponseItem::Reasoning {
+                id: "rs_1".to_string(),
+                summary: Vec::new(),
+                content: None,
+                encrypted_content: None,
+            },
+            ResponseItem::LocalShellCall {
+                id: Some("sh_1".to_string()),
+                call_id: Some("call_shell".to_string()),
+                status: LocalShellStatus::Completed,
+                action: LocalShellAction::Exec(LocalShellExecAction {
+                    command: vec!["echo".to_string(), "ok".to_string()],
+                    timeout_ms: None,
+                    working_directory: None,
+                    env: None,
+                    user: None,
+                }),
+            },
+            ResponseItem::FunctionCall {
+                id: Some("fc_1".to_string()),
+                name: "shell".to_string(),
+                namespace: None,
+                arguments: "{}".to_string(),
+                call_id: "call_function".to_string(),
+            },
+            ResponseItem::ToolSearchCall {
+                id: Some("tsc_1".to_string()),
+                call_id: Some("call_search".to_string()),
+                status: Some("completed".to_string()),
+                execution: "client".to_string(),
+                arguments: serde_json::json!({}),
+            },
+            ResponseItem::FunctionCallOutput {
+                id: Some("fco_1".to_string()),
+                call_id: "call_1".to_string(),
+                output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            },
+            ResponseItem::CustomToolCall {
+                id: Some("ctc_1".to_string()),
+                status: Some("completed".to_string()),
+                call_id: "call_custom".to_string(),
+                name: "apply_patch".to_string(),
+                input: "{}".to_string(),
+            },
+            ResponseItem::CustomToolCallOutput {
+                id: Some("ctco_1".to_string()),
+                call_id: "call_custom".to_string(),
+                name: Some("apply_patch".to_string()),
+                output: FunctionCallOutputPayload::from_text("ok".to_string()),
+            },
+            ResponseItem::ToolSearchOutput {
+                id: Some("tso_1".to_string()),
+                call_id: Some("call_search".to_string()),
+                status: "completed".to_string(),
+                execution: "client".to_string(),
+                tools: Vec::new(),
+            },
+            ResponseItem::WebSearchCall {
+                id: Some("ws_1".to_string()),
+                status: Some("completed".to_string()),
+                action: Some(WebSearchAction::Search {
+                    query: Some("weather".to_string()),
+                    queries: None,
+                }),
+            },
+            ResponseItem::ImageGenerationCall {
+                id: "ig_1".to_string(),
+                status: "completed".to_string(),
+                revised_prompt: None,
+                result: "image".to_string(),
+            },
+            ResponseItem::Compaction {
+                id: Some("cmp_1".to_string()),
+                encrypted_content: "opaque".to_string(),
+            },
+        ];
+        let mut payload = serde_json::json!({
+            "input": serde_json::to_value(&items).expect("serialize input"),
+        });
+
+        attach_response_item_ids_to_input(&mut payload, &items);
+
+        let ids = payload["input"]
+            .as_array()
+            .expect("input array")
+            .iter()
+            .map(|item| item["id"].as_str().expect("item id"))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            ids,
+            vec![
+                "msg_1", "rs_1", "sh_1", "fc_1", "tsc_1", "fco_1", "ctc_1", "ctco_1", "tso_1",
+                "ws_1", "ig_1", "cmp_1",
+            ]
+        );
+    }
+
+    #[test]
+    fn attach_response_item_ids_leaves_missing_ids_unchanged() {
+        let items = vec![ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: Vec::new(),
+            phase: None,
+        }];
+        let mut payload = serde_json::json!({
+            "input": serde_json::to_value(&items).expect("serialize input"),
+        });
+
+        attach_response_item_ids_to_input(&mut payload, &items);
+
+        assert_eq!(payload["input"][0].get("id"), None);
     }
 
     #[test]
@@ -2210,6 +2765,7 @@ mod tests {
     #[test]
     fn serializes_success_as_plain_string() -> Result<()> {
         let item = ResponseInputItem::FunctionCallOutput {
+            id: None,
             call_id: "call1".into(),
             output: FunctionCallOutputPayload::from_text("ok".into()),
         };
@@ -2225,6 +2781,7 @@ mod tests {
     #[test]
     fn serializes_failure_as_string() -> Result<()> {
         let item = ResponseInputItem::FunctionCallOutput {
+            id: None,
             call_id: "call1".into(),
             output: FunctionCallOutputPayload {
                 body: FunctionCallOutputBody::Text("bad".into()),
@@ -2271,6 +2828,7 @@ mod tests {
         );
 
         let item = ResponseInputItem::FunctionCallOutput {
+            id: None,
             call_id: "call1".into(),
             output: payload,
         };
@@ -2287,6 +2845,7 @@ mod tests {
     #[test]
     fn serializes_custom_tool_image_outputs_as_array() -> Result<()> {
         let item = ResponseInputItem::CustomToolCallOutput {
+            id: None,
             call_id: "call1".into(),
             name: None,
             output: FunctionCallOutputPayload::from_content_items(vec![
@@ -2309,6 +2868,7 @@ mod tests {
     #[test]
     fn serializes_encrypted_function_output_content_as_array() -> Result<()> {
         let item = ResponseInputItem::FunctionCallOutput {
+            id: None,
             call_id: "call1".into(),
             output: FunctionCallOutputPayload::from_content_items(vec![
                 FunctionCallOutputContentItem::EncryptedContent {
@@ -2492,6 +3052,7 @@ mod tests {
         assert_eq!(
             item,
             ResponseItem::Compaction {
+                id: None,
                 encrypted_content: "abc".into(),
             }
         );
@@ -2738,6 +3299,7 @@ mod tests {
     #[test]
     fn tool_search_output_roundtrips() -> Result<()> {
         let input = ResponseInputItem::ToolSearchOutput {
+            id: None,
             call_id: "search-1".to_string(),
             status: "completed".to_string(),
             execution: "client".to_string(),
@@ -2756,9 +3318,15 @@ mod tests {
                 }
             })],
         };
+        let item = ResponseItem::from(input.clone());
+        let ResponseItem::ToolSearchOutput { id: Some(id), .. } = &item else {
+            panic!("expected tool search output id");
+        };
+        assert!(id.starts_with("tso_"));
         assert_eq!(
-            ResponseItem::from(input.clone()),
+            item,
             ResponseItem::ToolSearchOutput {
+                id: Some(id.clone()),
                 call_id: Some("search-1".to_string()),
                 status: "completed".to_string(),
                 execution: "client".to_string(),
@@ -2844,6 +3412,7 @@ mod tests {
         assert_eq!(
             parsed_output,
             ResponseItem::ToolSearchOutput {
+                id: None,
                 call_id: None,
                 status: "completed".to_string(),
                 execution: "server".to_string(),

@@ -26,7 +26,11 @@ impl Session {
                 self.input_queue
                     .extend_pending_input_for_turn_state(
                         active_turn.turn_state.as_ref(),
-                        input.into_iter().map(TurnInput::ResponseItem).collect(),
+                        input
+                            .into_iter()
+                            .map(ResponseItem::with_stable_id)
+                            .map(TurnInput::ResponseItem)
+                            .collect(),
                     )
                     .await;
                 Ok(())
