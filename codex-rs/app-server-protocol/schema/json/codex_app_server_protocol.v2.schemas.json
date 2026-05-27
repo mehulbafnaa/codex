@@ -4242,6 +4242,16 @@
             "object",
             "null"
           ]
+        },
+        "network": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/NetworkRequirements"
+            },
+            {
+              "type": "null"
+            }
+          ]
         }
       },
       "type": "object"
@@ -8384,7 +8394,7 @@
           "additionalProperties": {
             "$ref": "#/definitions/NetworkDomainPermission"
           },
-          "description": "Canonical network permission map for `experimental_network`.",
+          "description": "Canonical network permission map for `permissions.network`.",
           "type": [
             "object",
             "null"
@@ -8423,7 +8433,7 @@
           "additionalProperties": {
             "$ref": "#/definitions/NetworkUnixSocketPermission"
           },
-          "description": "Canonical unix socket permission map for `experimental_network`.",
+          "description": "Canonical unix socket permission map for `permissions.network`.",
           "type": [
             "object",
             "null"
