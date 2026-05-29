@@ -156,6 +156,9 @@ pub struct McpServerRefreshConfig {
 
 #[derive(Debug, Clone, Deserialize, Serialize, PartialEq, JsonSchema, TS)]
 pub struct ConversationStartParams {
+    /// Overrides the configured realtime model for this session only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
     /// Selects whether the realtime session should produce text or audio output.
     pub output_modality: RealtimeOutputModality,
     #[serde(
@@ -169,6 +172,9 @@ pub struct ConversationStartParams {
     pub realtime_session_id: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub transport: Option<ConversationStartTransport>,
+    /// Overrides the configured realtime protocol version for this session only.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub version: Option<RealtimeConversationVersion>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub voice: Option<RealtimeVoice>,
 }
@@ -4798,19 +4804,23 @@ mod tests {
             },
         });
         let start = Op::RealtimeConversationStart(ConversationStartParams {
+            model: None,
             output_modality: RealtimeOutputModality::Audio,
             prompt: Some(Some("be helpful".to_string())),
             realtime_session_id: Some("conv_1".to_string()),
             transport: None,
+            version: None,
             voice: None,
         });
         let webrtc_start = Op::RealtimeConversationStart(ConversationStartParams {
+            model: None,
             output_modality: RealtimeOutputModality::Audio,
             prompt: Some(Some("be helpful".to_string())),
             realtime_session_id: Some("conv_1".to_string()),
             transport: Some(ConversationStartTransport::Webrtc {
                 sdp: "v=offer\r\n".to_string(),
             }),
+            version: None,
             voice: Some(RealtimeVoice::Cove),
         });
         let text = Op::RealtimeConversationText(ConversationTextParams {
@@ -4818,17 +4828,21 @@ mod tests {
         });
         let close = Op::RealtimeConversationClose;
         let default_prompt_start = Op::RealtimeConversationStart(ConversationStartParams {
+            model: None,
             output_modality: RealtimeOutputModality::Audio,
             prompt: None,
             realtime_session_id: None,
             transport: None,
+            version: None,
             voice: None,
         });
         let null_prompt_start = Op::RealtimeConversationStart(ConversationStartParams {
+            model: None,
             output_modality: RealtimeOutputModality::Audio,
             prompt: Some(None),
             realtime_session_id: None,
             transport: None,
+            version: None,
             voice: None,
         });
         let list_voices = Op::RealtimeConversationListVoices;
