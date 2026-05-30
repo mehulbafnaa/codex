@@ -46,6 +46,8 @@ pub enum SlashCommand {
     Diff,
     Mention,
     Status,
+    Cwd,
+    AddDir,
     DebugConfig,
     Title,
     Statusline,
@@ -100,6 +102,8 @@ impl SlashCommand {
             SlashCommand::Skills => "use skills to improve how Codex performs specific tasks",
             SlashCommand::Hooks => "view and manage lifecycle hooks",
             SlashCommand::Status => "show current session configuration and token usage",
+            SlashCommand::Cwd => "show or change the session working directory: /cwd [path]",
+            SlashCommand::AddDir => "add a directory to the session workspace: /add-dir <path>",
             SlashCommand::DebugConfig => "show config layers and requirement sources for debugging",
             SlashCommand::Title => "configure which items appear in the terminal title",
             SlashCommand::Statusline => "configure which items appear in the status line",
@@ -164,6 +168,8 @@ impl SlashCommand {
                 | SlashCommand::Btw
                 | SlashCommand::Resume
                 | SlashCommand::SandboxReadRoot
+                | SlashCommand::Cwd
+                | SlashCommand::AddDir
         )
     }
 
@@ -204,6 +210,7 @@ impl SlashCommand {
             | SlashCommand::Logout
             | SlashCommand::MemoryDrop
             | SlashCommand::MemoryUpdate => false,
+            SlashCommand::Cwd | SlashCommand::AddDir => false,
             SlashCommand::Diff
             | SlashCommand::Copy
             | SlashCommand::Raw
