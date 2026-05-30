@@ -26,6 +26,7 @@ use crate::tools::handlers::TestSyncHandler;
 use crate::tools::handlers::ToolSearchHandler;
 use crate::tools::handlers::UpdateGoalHandler;
 use crate::tools::handlers::ViewImageHandler;
+use crate::tools::handlers::WorkspaceMutationHandler;
 use crate::tools::handlers::WriteStdinHandler;
 use crate::tools::handlers::agent_jobs::ReportAgentJobResultHandler;
 use crate::tools::handlers::agent_jobs::SpawnAgentsOnCsvHandler;
@@ -653,6 +654,11 @@ fn add_core_utility_tools(context: &CoreToolPlanContext<'_>, planned_tools: &mut
 
     if features.enabled(Feature::RequestPermissionsTool) {
         planned_tools.add(RequestPermissionsHandler);
+    }
+
+    if matches!(environment_mode, ToolEnvironmentMode::Single) {
+        planned_tools.add(WorkspaceMutationHandler::set_working_directory());
+        planned_tools.add(WorkspaceMutationHandler::add_workspace_root());
     }
 
     if tool_suggest_enabled(turn_context)
