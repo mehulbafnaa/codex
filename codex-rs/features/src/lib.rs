@@ -207,6 +207,11 @@ pub enum Feature {
     RealtimeConversation,
     /// Prevent idle system sleep while a turn is actively running.
     PreventIdleSleep,
+    /// Temporary compatibility flag for Responses API Codex strict mode.
+    ///
+    /// Once app-server and bridge both require this contract, responses-lite
+    /// should always run in strict mode and this transition flag can be removed.
+    ResponsesApiCodexStrictMode,
     /// Enable remote compaction v2 over the normal Responses API.
     RemoteCompactionV2,
     /// Enable workspace dependency support.
@@ -1224,6 +1229,12 @@ pub const FEATURES: &[FeatureSpec] = &[
         id: Feature::ResponsesWebsocketsV2,
         key: "responses_websockets_v2",
         stage: Stage::Removed,
+        default_enabled: false,
+    },
+    FeatureSpec {
+        id: Feature::ResponsesApiCodexStrictMode,
+        key: "responses_api_codex_strict_mode",
+        stage: Stage::UnderDevelopment,
         default_enabled: false,
     },
     FeatureSpec {

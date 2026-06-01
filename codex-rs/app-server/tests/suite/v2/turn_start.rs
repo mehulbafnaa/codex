@@ -26,6 +26,7 @@ use codex_app_server_protocol::CollabAgentToolCallStatus;
 use codex_app_server_protocol::CommandExecutionApprovalDecision;
 use codex_app_server_protocol::CommandExecutionRequestApprovalResponse;
 use codex_app_server_protocol::CommandExecutionStatus;
+use codex_app_server_protocol::ErrorNotification;
 use codex_app_server_protocol::FileChangeApprovalDecision;
 use codex_app_server_protocol::FileChangePatchUpdatedNotification;
 use codex_app_server_protocol::FileChangeRequestApprovalResponse;
@@ -101,7 +102,53 @@ fn body_contains(req: &wiremock::Request, text: &str) -> bool {
         .is_some_and(|body| body.contains(text))
 }
 
+struct ImageTurnResult {
+    input_images: Vec<Value>,
+    response_request_bodies: Vec<Value>,
+    completed: TurnCompletedNotification,
+    error: Option<ErrorNotification>,
+}
+
 async fn run_local_image_turn(detail: Option<ImageDetail>) -> Result<Vec<Value>> {
+    Ok(
+        run_local_image_turn_with_options(detail, &BTreeMap::default())
+            .await?
+            .input_images,
+    )
+}
+
+async fn run_local_image_turn_with_options(
+    detail: Option<ImageDetail>,
+    feature_flags: &BTreeMap<Feature, bool>,
+) -> Result<ImageTurnResult> {
+    run_image_turn_with_options(feature_flags, move |codex_home, _server| {
+        let image_path = codex_home.join("image.png");
+        std::fs::write(&image_path, TINY_PNG_BYTES)?;
+        Ok(V2UserInput::LocalImage {
+            path: image_path,
+            detail,
+        })
+    })
+    .await
+}
+
+async fn run_url_image_turn_with_options(
+    detail: Option<ImageDetail>,
+    feature_flags: &BTreeMap<Feature, bool>,
+) -> Result<ImageTurnResult> {
+    run_image_turn_with_options(feature_flags, move |_codex_home, server| {
+        Ok(V2UserInput::Image {
+            url: format!("{}/strict-image.png", server.uri()),
+            detail,
+        })
+    })
+    .await
+}
+
+async fn run_image_turn_with_options(
+    feature_flags: &BTreeMap<Feature, bool>,
+    make_input: impl FnOnce(&Path, &wiremock::MockServer) -> Result<V2UserInput> + Send,
+) -> Result<ImageTurnResult> {
     // Two Codex turns hit the mock model (session start + turn/start).
     let responses = vec![
         create_final_assistant_message_sse_response("Done")?,
@@ -112,12 +159,7 @@ async fn run_local_image_turn(detail: Option<ImageDetail>) -> Result<Vec<Value>>
     let server = create_mock_responses_server_sequence_unchecked(responses).await;
 
     let codex_home = TempDir::new()?;
-    create_config_toml(
-        codex_home.path(),
-        &server.uri(),
-        "never",
-        &BTreeMap::default(),
-    )?;
+    create_config_toml(codex_home.path(), &server.uri(), "never", feature_flags)?;
 
     let mut mcp = TestAppServer::new(codex_home.path()).await?;
     timeout(DEFAULT_READ_TIMEOUT, mcp.initialize()).await??;
@@ -135,17 +177,11 @@ async fn run_local_image_turn(detail: Option<ImageDetail>) -> Result<Vec<Value>>
     .await??;
     let ThreadStartResponse { thread, .. } = to_response::<ThreadStartResponse>(thread_resp)?;
 
-    let image_path = codex_home.path().join("image.png");
-    std::fs::write(&image_path, TINY_PNG_BYTES)?;
-
     let turn_req = mcp
         .send_turn_start_request(TurnStartParams {
             thread_id: thread.id.clone(),
             client_user_message_id: None,
-            input: vec![V2UserInput::LocalImage {
-                path: image_path,
-                detail,
-            }],
+            input: vec![make_input(codex_home.path(), &server)?],
             ..Default::default()
         })
         .await?;
@@ -157,21 +193,59 @@ async fn run_local_image_turn(detail: Option<ImageDetail>) -> Result<Vec<Value>>
     let TurnStartResponse { turn } = to_response::<TurnStartResponse>(turn_resp)?;
     assert!(!turn.id.is_empty());
 
-    timeout(
-        DEFAULT_READ_TIMEOUT,
-        mcp.read_stream_until_notification_message("turn/completed"),
-    )
-    .await??;
+    let (completed, error) = read_turn_completion(&mut mcp).await?;
 
-    received_response_input_images(&server).await
+    let response_request_bodies = received_response_request_bodies(&server).await?;
+    let input_images = response_request_bodies
+        .iter()
+        .flat_map(input_images_from_response_request)
+        .collect();
+    Ok(ImageTurnResult {
+        input_images,
+        response_request_bodies,
+        completed,
+        error,
+    })
 }
 
-async fn received_response_input_images(server: &wiremock::MockServer) -> Result<Vec<Value>> {
+async fn read_turn_completion(
+    mcp: &mut TestAppServer,
+) -> Result<(TurnCompletedNotification, Option<ErrorNotification>)> {
+    let mut error = None;
+
+    loop {
+        let message = timeout(DEFAULT_READ_TIMEOUT, mcp.read_next_message()).await??;
+        let JSONRPCMessage::Notification(notification) = message else {
+            continue;
+        };
+
+        match notification.method.as_str() {
+            "error" => {
+                error = Some(serde_json::from_value(
+                    notification
+                        .params
+                        .context("error notification params must be present")?,
+                )?);
+            }
+            "turn/completed" => {
+                let completed = serde_json::from_value(
+                    notification
+                        .params
+                        .context("turn/completed params must be present")?,
+                )?;
+                return Ok((completed, error));
+            }
+            _ => {}
+        }
+    }
+}
+
+async fn received_response_request_bodies(server: &wiremock::MockServer) -> Result<Vec<Value>> {
     let requests = server
         .received_requests()
         .await
         .context("failed to fetch received requests")?;
-    let mut input_images = Vec::new();
+    let mut response_request_bodies = Vec::new();
 
     for request in requests {
         if !request.url.path().ends_with("/responses") {
@@ -180,27 +254,28 @@ async fn received_response_input_images(server: &wiremock::MockServer) -> Result
         let body = request
             .body_json::<Value>()
             .context("request body should be JSON")?;
-        let Some(input) = body.get("input").and_then(Value::as_array) else {
-            continue;
-        };
-
-        for item in input {
-            if item.get("type").and_then(Value::as_str) != Some("message") {
-                continue;
-            }
-            let Some(content) = item.get("content").and_then(Value::as_array) else {
-                continue;
-            };
-            input_images.extend(
-                content
-                    .iter()
-                    .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_image"))
-                    .cloned(),
-            );
-        }
+        response_request_bodies.push(body);
     }
 
-    Ok(input_images)
+    Ok(response_request_bodies)
+}
+
+fn input_images_from_response_request(body: &Value) -> Vec<Value> {
+    let Some(input) = body.get("input").and_then(Value::as_array) else {
+        return Vec::new();
+    };
+
+    input
+        .iter()
+        .filter(|item| item.get("type").and_then(Value::as_str) == Some("message"))
+        .filter_map(|item| item.get("content").and_then(Value::as_array))
+        .flat_map(|content| {
+            content
+                .iter()
+                .filter(|span| span.get("type").and_then(Value::as_str) == Some("input_image"))
+                .cloned()
+        })
+        .collect()
 }
 
 #[tokio::test]
@@ -1806,6 +1881,100 @@ async fn turn_start_forwards_custom_local_image_detail() -> Result<()> {
     assert_eq!(input_images.len(), 1);
     assert_eq!(
         input_images[0].get("detail").and_then(Value::as_str),
+        Some("original")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_start_responses_codex_strict_mode_prepares_local_image_and_sets_metadata()
+-> Result<()> {
+    let result = run_local_image_turn_with_options(
+        Some(ImageDetail::High),
+        &BTreeMap::from([(Feature::ResponsesApiCodexStrictMode, true)]),
+    )
+    .await?;
+
+    assert_eq!(result.input_images.len(), 1);
+    assert_eq!(result.input_images[0].get("detail"), None);
+
+    let image_request = result
+        .response_request_bodies
+        .iter()
+        .find(|body| !input_images_from_response_request(body).is_empty())
+        .context("expected request containing an input image")?;
+    assert_eq!(
+        image_request
+            .get("client_metadata")
+            .and_then(|metadata| metadata.get("RESPONSES_API_CODEX_STRICT_MODE"))
+            .and_then(Value::as_str),
+        Some("true")
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_start_responses_codex_strict_mode_rejects_http_image_url() -> Result<()> {
+    let result = run_url_image_turn_with_options(
+        Some(ImageDetail::High),
+        &BTreeMap::from([(Feature::ResponsesApiCodexStrictMode, true)]),
+    )
+    .await?;
+
+    assert_eq!(result.completed.turn.status, TurnStatus::Failed);
+    let error = result
+        .completed
+        .turn
+        .error
+        .as_ref()
+        .context("failed turn should include an error")?;
+    assert!(
+        error
+            .message
+            .contains("strict mode only supports data URL images"),
+        "unexpected error: {}",
+        error.message
+    );
+    assert!(
+        error.message.contains("/strict-image.png"),
+        "unexpected error: {}",
+        error.message
+    );
+    assert!(result.input_images.is_empty());
+    assert!(
+        result
+            .response_request_bodies
+            .iter()
+            .all(|body| !body.to_string().contains("/strict-image.png")),
+        "HTTP image URL should not be forwarded to /responses: {:?}",
+        result.response_request_bodies
+    );
+    assert_eq!(
+        result.error.as_ref().map(|error| &error.error.message),
+        Some(&error.message)
+    );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn turn_start_non_strict_mode_forwards_http_image_url_and_detail() -> Result<()> {
+    let result =
+        run_url_image_turn_with_options(Some(ImageDetail::Original), &BTreeMap::default()).await?;
+
+    assert_eq!(result.input_images.len(), 1);
+    let image_url = result.input_images[0]
+        .get("image_url")
+        .and_then(Value::as_str)
+        .context("input image should have image_url")?;
+    assert!(
+        image_url.ends_with("/strict-image.png") && !image_url.starts_with("data:"),
+        "expected forwarded remote URL, got {image_url}"
+    );
+    assert_eq!(
+        result.input_images[0].get("detail").and_then(Value::as_str),
         Some("original")
     );
 

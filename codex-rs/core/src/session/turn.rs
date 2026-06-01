@@ -164,8 +164,13 @@ pub(crate) async fn run_turn(
         return None;
     }
 
-    sess.record_context_updates_and_set_reference_context_item(turn_context.as_ref())
-        .await;
+    if let Err(err) = sess
+        .record_context_updates_and_set_reference_context_item(turn_context.as_ref())
+        .await
+    {
+        emit_turn_input_error(&sess, &turn_context, err).await;
+        return None;
+    }
 
     let (injection_items, explicitly_enabled_connectors) =
         build_skills_and_plugins(&sess, turn_context.as_ref(), &input, &cancellation_token).await?;
@@ -174,8 +179,13 @@ pub(crate) async fn run_turn(
         return None;
     }
     let mut can_drain_pending_input = input.is_empty();
-    if run_hooks_and_record_inputs(&sess, &turn_context, &input).await {
-        return None;
+    match run_hooks_and_record_inputs(&sess, &turn_context, &input).await {
+        Ok(true) => return None,
+        Ok(false) => {}
+        Err(err) => {
+            emit_turn_input_error(&sess, &turn_context, err).await;
+            return None;
+        }
     }
 
     sess.merge_connector_selection(explicitly_enabled_connectors.clone())
@@ -186,8 +196,13 @@ pub(crate) async fn run_turn(
     }))
     .await;
     for response_item in injection_items {
-        sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
-            .await;
+        if let Err(err) = sess
+            .record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
+            .await
+        {
+            emit_turn_input_error(&sess, &turn_context, err).await;
+            return None;
+        }
     }
 
     track_turn_resolved_config_analytics(&sess, &turn_context, &input).await;
@@ -229,8 +244,13 @@ pub(crate) async fn run_turn(
             Vec::new()
         };
 
-        if run_hooks_and_record_inputs(&sess, &turn_context, &pending_input).await {
-            break;
+        match run_hooks_and_record_inputs(&sess, &turn_context, &pending_input).await {
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(err) => {
+                emit_turn_input_error(&sess, &turn_context, err).await;
+                break;
+            }
         }
 
         // Construct the input that we will send to the model.
@@ -334,11 +354,16 @@ pub(crate) async fn run_turn(
                         if let Some(hook_prompt_message) =
                             build_hook_prompt_message(&stop_outcome.continuation_fragments)
                         {
-                            sess.record_conversation_items(
-                                &turn_context,
-                                std::slice::from_ref(&hook_prompt_message),
-                            )
-                            .await;
+                            if let Err(err) = sess
+                                .record_conversation_items(
+                                    &turn_context,
+                                    std::slice::from_ref(&hook_prompt_message),
+                                )
+                                .await
+                            {
+                                emit_turn_input_error(&sess, &turn_context, err).await;
+                                break;
+                            }
                             stop_hook_active = true;
                             continue;
                         } else {
@@ -425,14 +450,15 @@ async fn run_hooks_and_record_inputs(
     sess: &Arc<Session>,
     turn_context: &Arc<TurnContext>,
     input: &[TurnInput],
-) -> bool {
+) -> CodexResult<bool> {
     let mut blocked_input = false;
     let mut accepted_user_input = false;
     for input_item in input {
         let hook_outcome = inspect_pending_input(sess, turn_context, input_item).await;
         if hook_outcome.should_stop {
             blocked_input = true;
-            record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts).await;
+            record_additional_contexts(sess, turn_context, hook_outcome.additional_contexts)
+                .await?;
         } else {
             if matches!(input_item, TurnInput::UserInput { content, .. } if !content.is_empty()) {
                 accepted_user_input = true;
@@ -443,10 +469,23 @@ async fn run_hooks_and_record_inputs(
                 input_item.clone(),
                 hook_outcome.additional_contexts,
             )
-            .await;
+            .await?;
         }
     }
-    blocked_input && !accepted_user_input
+    Ok(blocked_input && !accepted_user_input)
+}
+
+async fn emit_turn_input_error(
+    sess: &Arc<Session>,
+    turn_context: &Arc<TurnContext>,
+    err: CodexErr,
+) {
+    info!("Turn input error: {err:#}");
+    let error = err.to_codex_protocol_error();
+    sess.emit_turn_error_lifecycle(turn_context.as_ref(), error)
+        .await;
+    let event = EventMsg::Error(err.to_error_event(/*message_prefix*/ None));
+    sess.send_event(turn_context, event).await;
 }
 
 #[expect(
@@ -1691,7 +1730,7 @@ async fn handle_assistant_item_done_in_plan_mode(
     state: &mut PlanModeStreamState,
     previously_active_item: Option<&TurnItem>,
     last_agent_message: &mut Option<String>,
-) -> bool {
+) -> CodexResult<bool> {
     if let ResponseItem::Message { role, .. } = item
         && role == "assistant"
     {
@@ -1727,13 +1766,13 @@ async fn handle_assistant_item_done_in_plan_mode(
             item,
             finalized_facts.as_ref(),
         )
-        .await;
+        .await?;
         if let Some(agent_message) = final_last_agent_message {
             *last_agent_message = Some(agent_message);
         }
-        return true;
+        return Ok(true);
     }
-    false
+    Ok(false)
 }
 
 async fn drain_in_flight(
@@ -1746,7 +1785,7 @@ async fn drain_in_flight(
             Ok(response_input) => {
                 let response_item = response_input.into();
                 sess.record_conversation_items(&turn_context, std::slice::from_ref(&response_item))
-                    .await;
+                    .await?;
                 mark_thread_memory_mode_polluted_if_external_context(
                     sess.as_ref(),
                     turn_context.as_ref(),
@@ -1906,7 +1945,7 @@ async fn try_run_sampling_request(
                         previously_streamed_item.as_ref(),
                         &mut last_agent_message,
                     )
-                    .await
+                    .await?
                 {
                     continue;
                 }

@@ -8,6 +8,7 @@ use codex_network_proxy::PROXY_ACTIVE_ENV_KEY;
 use codex_utils_absolute_path::AbsolutePathBuf;
 use tokio_util::sync::CancellationToken;
 use tracing::error;
+use tracing::warn;
 use uuid::Uuid;
 
 use crate::exec::ExecCapturePolicy;
@@ -408,7 +409,8 @@ async fn persist_user_shell_output(
     if mode == UserShellCommandMode::StandaloneTurn {
         session
             .record_conversation_items(turn_context, std::slice::from_ref(&output_item))
-            .await;
+            .await
+            .unwrap_or_else(|err| warn!("failed to record standalone shell output: {err:#}"));
         // Standalone shell turns can run before any regular user turn, so
         // explicitly materialize rollout persistence after recording output.
         session.ensure_rollout_materialized().await;
@@ -417,7 +419,8 @@ async fn persist_user_shell_output(
 
     session
         .inject_no_new_turn(vec![output_item], Some(turn_context))
-        .await;
+        .await
+        .unwrap_or_else(|err| warn!("failed to inject shell output: {err:#}"));
 }
 
 #[cfg(all(test, unix))]
