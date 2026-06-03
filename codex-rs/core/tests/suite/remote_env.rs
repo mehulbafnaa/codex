@@ -467,10 +467,12 @@ async fn remote_request_permissions_grant_unblocks_later_remote_exec() -> Result
             TurnEnvironmentSelection {
                 environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
                 cwd: local_cwd.path().abs(),
+                workspace_roots: Vec::new(),
             },
             TurnEnvironmentSelection {
                 environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
                 cwd: remote_cwd.clone(),
+                workspace_roots: Vec::new(),
             },
         ],
     )
