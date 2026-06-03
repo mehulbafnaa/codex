@@ -711,7 +711,6 @@ impl ThreadManager {
             config,
             initial_history,
             auth_manager,
-            persist_extended_history,
             parent_trace,
             RuntimeWorkspaceReplayOverrides::default(),
         )
@@ -723,7 +722,6 @@ impl ThreadManager {
         mut config: Config,
         initial_history: InitialHistory,
         auth_manager: Arc<AuthManager>,
-        persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
         runtime_workspace_overrides: RuntimeWorkspaceReplayOverrides,
     ) -> CodexResult<NewThread> {
@@ -934,7 +932,6 @@ impl ThreadManager {
             config,
             history,
             thread_source,
-            persist_extended_history,
             parent_trace,
             RuntimeWorkspaceReplayOverrides::default(),
         )
@@ -948,7 +945,6 @@ impl ThreadManager {
         config: Config,
         history: InitialHistory,
         thread_source: Option<ThreadSource>,
-        persist_extended_history: bool,
         parent_trace: Option<W3cTraceContext>,
         runtime_workspace_overrides: RuntimeWorkspaceReplayOverrides,
     ) -> CodexResult<NewThread>
