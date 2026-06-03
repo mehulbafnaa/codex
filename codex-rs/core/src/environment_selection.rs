@@ -236,6 +236,7 @@ url = "ws://127.0.0.1:8765"
             &[TurnEnvironmentSelection {
                 environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
                 cwd: cwd.clone(),
+                workspace_roots: Vec::new(),
             }],
         )
         .expect("local environment should resolve");
@@ -249,6 +250,7 @@ url = "ws://127.0.0.1:8765"
             &[TurnEnvironmentSelection {
                 environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
                 cwd: cwd.clone(),
+                workspace_roots: Vec::new(),
             }],
         )
         .expect("remote environment should resolve");
@@ -264,10 +266,12 @@ url = "ws://127.0.0.1:8765"
                 TurnEnvironmentSelection {
                     environment_id: LOCAL_ENVIRONMENT_ID.to_string(),
                     cwd: cwd.clone(),
+                    workspace_roots: Vec::new(),
                 },
                 TurnEnvironmentSelection {
                     environment_id: REMOTE_ENVIRONMENT_ID.to_string(),
                     cwd: cwd.clone(),
+                    workspace_roots: Vec::new(),
                 },
             ],
         )
