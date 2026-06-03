@@ -22,10 +22,87 @@ the wire.
 The CLI entrypoint supports:
 
 - `ws://IP:PORT` (default)
+- `--remote URL --environment-id ID [--name NAME]`
+
+Remote mode registers the local exec-server with the environment registry,
+then reconnects to the service-provided rendezvous websocket as the environment.
+It uses the standard Codex ChatGPT sign-in state; run `codex login` first when
+remote registration needs authentication. Containerized callers that receive an
+Agent Identity JWT in `CODEX_ACCESS_TOKEN` can opt into that auth path with
+`--use-agent-identity-auth`; Codex then registers an Agent task and sends the
+derived AgentAssertion headers on the registry request.
+
+Alternatively, API users can instead use `CODEX_API_KEY`;
+Codex sends it as a bearer token on the registration request. For example:
+
+```sh
+CODEX_API_KEY="$OPENAI_API_KEY" \
+codex exec-server \
+  --remote ... \
+  --environment-id "$ENVIRONMENT_ID"
+```
 
 Wire framing:
 
-- websocket: one JSON-RPC message per websocket text frame
+- local websocket: one JSON-RPC message per websocket frame
+- remote websocket: binary protobuf relay frames carrying JSON-RPC payloads
+
+## Remote Relay Message Format
+
+In remote mode, the harness and environment communicate through rendezvous using
+`codex.exec_server.relay.v1.RelayMessageFrame`; the checked-in schema is in
+`src/proto/codex.exec_server.relay.v1.proto`. The relay frame carries stream
+identity plus endpoint-owned reliability metadata:
+
+```text
+version
+stream_id
+body              // data | ack_frame | resume | reset | heartbeat
+ack               // highest contiguous peer segment seq received
+ack_bits          // bitset for peer segment seqs after ack
+seq               // data only: segment sequence number
+segment_index     // data only: 0-based index within message
+segment_count     // data only: number of segments in message
+payload           // data only: JSON-RPC message bytes or segment bytes
+next_seq          // resume only: next sender seq
+reason            // reset only: reset reason
+```
+
+`stream_id` identifies one virtual harness/environment JSON-RPC session on the
+environment websocket. The harness generates a UUIDv4 `stream_id`; the environment
+demuxes frames by `stream_id` and runs an independent `ConnectionProcessor` per
+stream.
+
+Use segment-level sequence numbers for reliability:
+
+```text
+seq = 0, 1, 2, 3, ...
+```
+
+Use contiguous segment sequence ranges to identify and stitch a segmented
+application message:
+
+```text
+message_start_seq = seq - segment_index
+segment_index = 0
+segment_count = 1
+```
+
+`message_start_seq` is derived by the receiver, not sent on the wire. For
+unsplit messages, `message_start_seq == seq`, `segment_index == 0`, and
+`segment_count == 1`.
+
+Use cumulative `ack` plus fixed-size `ack_bits` instead of variable ack ranges:
+
+```text
+ack = highest contiguous received segment seq
+bit i in ack_bits acknowledges seq = ack + 1 + i
+```
+
+Send `ack` and `ack_bits` redundantly on every outbound frame. Acks are not
+themselves acked. Acks, retries, duplicate suppression, segmentation, and
+reassembly are endpoint responsibilities; rendezvous only routes relay frames
+by `stream_id`.
 
 ## Lifecycle
 
@@ -85,6 +162,7 @@ Request params:
     "PATH": "/usr/bin:/bin"
   },
   "tty": true,
+  "pipeStdin": false,
   "arg0": null
 }
 ```
@@ -95,8 +173,8 @@ Field definitions:
 - `argv`: command vector. It must be non-empty.
 - `cwd`: absolute working directory used for the child process.
 - `env`: environment variables passed to the child process.
-- `tty`: when `true`, spawn a PTY-backed interactive process; when `false`,
-  spawn a pipe-backed process with closed stdin.
+- `tty`: when `true`, spawn a PTY-backed interactive process.
+- `pipeStdin`: when `true`, keep non-PTY stdin writable via `process/write`.
 - `arg0`: optional argv0 override forwarded to `codex-utils-pty`.
 
 Response:
@@ -111,7 +189,7 @@ Behavior notes:
 
 - Reusing an existing `processId` is rejected.
 - PTY-backed processes accept later writes through `process/write`.
-- Pipe-backed processes are launched with stdin closed and reject writes.
+- Non-PTY processes reject writes unless `pipeStdin` is `true`.
 - Output is streamed asynchronously via `process/output`.
 - Exit is reported asynchronously via `process/exited`.
 
@@ -153,7 +231,7 @@ Response:
 
 ### `process/write`
 
-Writes raw bytes to a running PTY-backed process stdin.
+Writes raw bytes to a running process stdin.
 
 Request params:
 
@@ -177,7 +255,7 @@ Response:
 Behavior notes:
 
 - Writes to an unknown `processId` are rejected.
-- Writes to a non-PTY process are rejected because stdin is already closed.
+- Writes to a non-PTY process are rejected unless it started with `pipeStdin`.
 
 ### `process/terminate`
 
@@ -307,10 +385,14 @@ The crate exports:
 - `DEFAULT_LISTEN_URL` and `ExecServerListenUrlParseError`
 - `ExecServerRuntimePaths`
 - `run_main()` for embedding the websocket server
+- `RemoteEnvironmentConfig` and `run_remote_environment()` for embedding remote
+  registration mode
 
 Callers must pass `ExecServerRuntimePaths` to `run_main()`. The top-level
 `codex exec-server` command builds these paths from the `codex` arg0 dispatch
-state.
+state. `RemoteEnvironmentConfig::new(...)` also takes the auth provider that
+remote registration should use; the CLI builds that provider from Codex auth
+state before starting remote mode.
 
 ## Example session
 
@@ -325,7 +407,7 @@ Initialize:
 Start a process:
 
 ```json
-{"id":2,"method":"process/start","params":{"processId":"proc-1","argv":["bash","-lc","printf 'ready\\n'; while IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; done"],"cwd":"/tmp","env":{"PATH":"/usr/bin:/bin"},"tty":true,"arg0":null}}
+{"id":2,"method":"process/start","params":{"processId":"proc-1","argv":["bash","-lc","printf 'ready\\n'; while IFS= read -r line; do printf 'echo:%s\\n' \"$line\"; done"],"cwd":"/tmp","env":{"PATH":"/usr/bin:/bin"},"tty":true,"pipeStdin":false,"arg0":null}}
 {"id":2,"result":{"processId":"proc-1"}}
 {"method":"process/output","params":{"processId":"proc-1","seq":1,"stream":"stdout","chunk":"cmVhZHkK"}}
 ```

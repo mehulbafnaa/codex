@@ -18,10 +18,10 @@ use crate::spawn::CODEX_SANDBOX_NETWORK_DISABLED_ENV_VAR;
 use codex_network_proxy::NetworkProxy;
 use codex_protocol::config_types::WindowsSandboxLevel;
 use codex_protocol::exec_output::ExecToolCallOutput;
+use codex_protocol::models::PermissionProfile;
 pub use codex_protocol::models::SandboxPermissions;
 use codex_protocol::permissions::FileSystemSandboxPolicy;
 use codex_protocol::permissions::NetworkSandboxPolicy;
-use codex_protocol::protocol::SandboxPolicy;
 use codex_sandboxing::SandboxExecRequest;
 use codex_sandboxing::SandboxType;
 use codex_utils_absolute_path::AbsolutePathBuf;
@@ -31,7 +31,6 @@ use std::collections::HashMap;
 pub(crate) struct ExecOptions {
     pub(crate) expiration: ExecExpiration,
     pub(crate) capture_policy: ExecCapturePolicy,
-    pub(crate) log_macos_seatbelt_denials: bool,
 }
 
 #[derive(Clone, Debug)]
@@ -50,13 +49,14 @@ pub struct ExecRequest {
     pub expiration: ExecExpiration,
     pub capture_policy: ExecCapturePolicy,
     pub sandbox: SandboxType,
+    pub windows_sandbox_policy_cwd: AbsolutePathBuf,
+    pub windows_sandbox_workspace_roots: Vec<AbsolutePathBuf>,
     pub windows_sandbox_level: WindowsSandboxLevel,
     pub windows_sandbox_private_desktop: bool,
-    pub sandbox_policy: SandboxPolicy,
+    pub permission_profile: PermissionProfile,
     pub file_system_sandbox_policy: FileSystemSandboxPolicy,
     pub network_sandbox_policy: NetworkSandboxPolicy,
     pub(crate) windows_sandbox_filesystem_overrides: Option<WindowsSandboxFilesystemOverrides>,
-    pub log_macos_seatbelt_denials: bool,
     pub arg0: Option<String>,
 }
 
@@ -70,14 +70,15 @@ impl ExecRequest {
         expiration: ExecExpiration,
         capture_policy: ExecCapturePolicy,
         sandbox: SandboxType,
+        windows_sandbox_workspace_roots: Vec<AbsolutePathBuf>,
         windows_sandbox_level: WindowsSandboxLevel,
         windows_sandbox_private_desktop: bool,
-        sandbox_policy: SandboxPolicy,
-        file_system_sandbox_policy: FileSystemSandboxPolicy,
-        network_sandbox_policy: NetworkSandboxPolicy,
-        log_macos_seatbelt_denials: bool,
+        permission_profile: PermissionProfile,
         arg0: Option<String>,
     ) -> Self {
+        let windows_sandbox_policy_cwd = cwd.clone();
+        let (file_system_sandbox_policy, network_sandbox_policy) =
+            permission_profile.to_runtime_permissions();
         Self {
             command,
             cwd,
@@ -87,13 +88,14 @@ impl ExecRequest {
             expiration,
             capture_policy,
             sandbox,
+            windows_sandbox_policy_cwd,
+            windows_sandbox_workspace_roots,
             windows_sandbox_level,
             windows_sandbox_private_desktop,
-            sandbox_policy,
+            permission_profile,
             file_system_sandbox_policy,
             network_sandbox_policy,
             windows_sandbox_filesystem_overrides: None,
-            log_macos_seatbelt_denials,
             arg0,
         }
     }
@@ -101,6 +103,8 @@ impl ExecRequest {
     pub(crate) fn from_sandbox_exec_request(
         request: SandboxExecRequest,
         options: ExecOptions,
+        windows_sandbox_policy_cwd: AbsolutePathBuf,
+        windows_sandbox_workspace_roots: Vec<AbsolutePathBuf>,
     ) -> Self {
         let SandboxExecRequest {
             command,
@@ -110,7 +114,7 @@ impl ExecRequest {
             sandbox,
             windows_sandbox_level,
             windows_sandbox_private_desktop,
-            sandbox_policy,
+            permission_profile,
             file_system_sandbox_policy,
             network_sandbox_policy,
             arg0,
@@ -118,7 +122,6 @@ impl ExecRequest {
         let ExecOptions {
             expiration,
             capture_policy,
-            log_macos_seatbelt_denials,
         } = options;
         if !network_sandbox_policy.is_enabled() {
             env.insert(
@@ -139,13 +142,14 @@ impl ExecRequest {
             expiration,
             capture_policy,
             sandbox,
+            windows_sandbox_policy_cwd,
+            windows_sandbox_workspace_roots,
             windows_sandbox_level,
             windows_sandbox_private_desktop,
-            sandbox_policy,
+            permission_profile,
             file_system_sandbox_policy,
             network_sandbox_policy,
             windows_sandbox_filesystem_overrides: None,
-            log_macos_seatbelt_denials,
             arg0,
         }
     }

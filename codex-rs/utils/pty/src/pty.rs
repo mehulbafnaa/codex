@@ -242,6 +242,7 @@ async fn spawn_process_portable(
         exit_status,
         exit_code,
         Some(handles),
+        /*resizer*/ None,
     );
 
     Ok(SpawnedProcess {
@@ -249,7 +250,6 @@ async fn spawn_process_portable(
         stdout_rx,
         stderr_rx,
         exit_rx,
-        child_pid: process_group_id,
     })
 }
 
@@ -396,6 +396,7 @@ async fn spawn_process_preserving_fds(
         exit_status,
         exit_code,
         Some(handles),
+        /*resizer*/ None,
     );
 
     Ok(SpawnedProcess {
@@ -403,7 +404,6 @@ async fn spawn_process_preserving_fds(
         stdout_rx,
         stderr_rx,
         exit_rx,
-        child_pid: Some(process_group_id),
     })
 }
 

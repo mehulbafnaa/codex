@@ -1,6 +1,7 @@
 use anyhow::Context;
 use anyhow::Result;
 use anyhow::bail;
+use app_test_support::DISABLE_PLUGIN_STARTUP_TASKS_ARG;
 use app_test_support::create_mock_responses_server_sequence_unchecked;
 use app_test_support::to_response;
 use base64::Engine;
@@ -47,6 +48,12 @@ use tokio_tungstenite::tungstenite::http::HeaderValue;
 use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::http::header::ORIGIN;
 
+// macOS and Windows CI can spend tens of seconds starting the app-server test
+// binary under Bazel before it accepts JSON-RPC or reports its websocket bind
+// address.
+#[cfg(any(target_os = "macos", windows))]
+pub(super) const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(60);
+#[cfg(not(any(target_os = "macos", windows)))]
 pub(super) const DEFAULT_READ_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub(super) type WsClient = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
@@ -168,7 +175,7 @@ async fn websocket_transport_rejects_missing_and_invalid_capability_tokens() -> 
     ];
 
     let (mut process, bind_addr) =
-        spawn_websocket_server_with_args(codex_home.path(), "ws://127.0.0.1:0", &auth_args).await?;
+        spawn_websocket_server_with_args(codex_home.path(), "ws://0.0.0.0:0", &auth_args).await?;
 
     assert_websocket_connect_rejected(bind_addr, /*bearer_token*/ None).await?;
     assert_websocket_connect_rejected(bind_addr, Some("wrong-token")).await?;
@@ -315,30 +322,30 @@ async fn websocket_transport_rejects_short_signed_bearer_secret_configuration() 
 }
 
 #[tokio::test]
-async fn websocket_transport_allows_unauthenticated_non_loopback_startup_by_default() -> Result<()>
-{
+async fn websocket_transport_rejects_unauthenticated_non_loopback_startup() -> Result<()> {
     let server = create_mock_responses_server_sequence_unchecked(Vec::new()).await;
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri(), "never")?;
 
-    let (mut process, bind_addr) =
-        spawn_websocket_server_with_args(codex_home.path(), "ws://0.0.0.0:0", &[]).await?;
-
-    let mut ws = connect_websocket(bind_addr).await?;
-    send_initialize_request(&mut ws, /*id*/ 1, "ws_non_loopback_default_client").await?;
-    let init = read_response_for_id(&mut ws, /*id*/ 1).await?;
-    assert_eq!(init.id, RequestId::Integer(1));
-
-    process
-        .kill()
-        .await
-        .context("failed to stop websocket app-server process")?;
+    let output =
+        run_websocket_server_to_completion_with_args(codex_home.path(), "ws://0.0.0.0:0", &[])
+            .await?;
+    assert!(
+        !output.status.success(),
+        "unauthenticated non-loopback listener should fail websocket server startup"
+    );
+    let stderr = String::from_utf8(output.stderr).context("stderr should be valid utf-8")?;
+    assert!(
+        stderr.contains("refusing to start non-loopback websocket listener"),
+        "unexpected stderr: {stderr}"
+    );
 
     Ok(())
 }
 
 #[tokio::test]
-async fn websocket_disconnect_unloads_last_subscribed_thread() -> Result<()> {
+async fn websocket_disconnect_keeps_last_subscribed_thread_loaded_until_idle_timeout() -> Result<()>
+{
     let server = create_mock_responses_server_sequence_unchecked(Vec::new()).await;
     let codex_home = TempDir::new()?;
     create_config_toml(codex_home.path(), &server.uri(), "never")?;
@@ -359,7 +366,7 @@ async fn websocket_disconnect_unloads_last_subscribed_thread() -> Result<()> {
     send_initialize_request(&mut ws2, /*id*/ 4, "ws_reconnect_client").await?;
     read_response_for_id(&mut ws2, /*id*/ 4).await?;
 
-    wait_for_loaded_threads(&mut ws2, /*first_id*/ 5, &[]).await?;
+    wait_for_loaded_threads(&mut ws2, /*first_id*/ 5, &[thread_id.as_str()]).await?;
 
     process
         .kill()
@@ -382,12 +389,13 @@ pub(super) async fn spawn_websocket_server_with_args(
     let mut cmd = Command::new(program);
     cmd.arg("--listen")
         .arg(listen_url)
+        .arg(DISABLE_PLUGIN_STARTUP_TASKS_ARG)
         .args(extra_args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .env("CODEX_HOME", codex_home)
-        .env("RUST_LOG", "debug");
+        .env("RUST_LOG", "warn");
     let mut process = cmd
         .kill_on_drop(true)
         .spawn()
@@ -398,7 +406,7 @@ pub(super) async fn spawn_websocket_server_with_args(
         .take()
         .context("failed to capture websocket app-server stderr")?;
     let mut stderr_reader = BufReader::new(stderr).lines();
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + DEFAULT_READ_TIMEOUT;
     let bind_addr = loop {
         let line = timeout(
             deadline.saturating_duration_since(Instant::now()),
@@ -456,7 +464,7 @@ pub(super) async fn connect_websocket_with_bearer(
 ) -> Result<WsClient> {
     let url = format!("ws://{}", connectable_bind_addr(bind_addr));
     let request = websocket_request(url.as_str(), bearer_token, /*origin*/ None)?;
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + DEFAULT_READ_TIMEOUT;
     loop {
         match connect_async(request.clone()).await {
             Ok((stream, _response)) => return Ok(stream),
@@ -517,13 +525,14 @@ async fn run_websocket_server_to_completion_with_args(
     let mut cmd = Command::new(program);
     cmd.arg("--listen")
         .arg(listen_url)
+        .arg(DISABLE_PLUGIN_STARTUP_TASKS_ARG)
         .args(extra_args)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::piped())
         .env("CODEX_HOME", codex_home)
-        .env("RUST_LOG", "debug");
-    timeout(Duration::from_secs(10), cmd.output())
+        .env("RUST_LOG", "warn");
+    timeout(DEFAULT_READ_TIMEOUT, cmd.output())
         .await
         .context("timed out waiting for websocket app-server to exit")?
         .context("failed to run websocket app-server")
@@ -535,7 +544,7 @@ async fn http_get(
     path: &str,
 ) -> Result<reqwest::Response> {
     let connectable_bind_addr = connectable_bind_addr(bind_addr);
-    let deadline = Instant::now() + Duration::from_secs(10);
+    let deadline = Instant::now() + DEFAULT_READ_TIMEOUT;
     loop {
         match client
             .get(format!("http://{connectable_bind_addr}{path}"))
@@ -749,12 +758,15 @@ pub(super) async fn read_response_and_notification_for_method(
             JSONRPCMessage::Response(candidate) if candidate.id == target_id => {
                 response = Some(candidate);
             }
+            JSONRPCMessage::Notification(candidate)
+                if candidate.method == method && notification.is_some() =>
+            {
+                bail!(
+                    "received duplicate notification for method `{method}` before completing paired read"
+                );
+            }
             JSONRPCMessage::Notification(candidate) if candidate.method == method => {
-                if notification.replace(candidate).is_some() {
-                    bail!(
-                        "received duplicate notification for method `{method}` before completing paired read"
-                    );
-                }
+                notification = Some(candidate);
             }
             _ => {}
         }
@@ -770,7 +782,7 @@ pub(super) async fn read_response_and_notification_for_method(
     Ok((response, notification))
 }
 
-async fn read_error_for_id(stream: &mut WsClient, id: i64) -> Result<JSONRPCError> {
+pub(super) async fn read_error_for_id(stream: &mut WsClient, id: i64) -> Result<JSONRPCError> {
     let target_id = RequestId::Integer(id);
     loop {
         let message = read_jsonrpc_message(stream).await?;
