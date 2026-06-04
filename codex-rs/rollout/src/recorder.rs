@@ -1678,11 +1678,9 @@ impl JsonlWriter {
         let timestamp = OffsetDateTime::now_utc()
             .format(timestamp_format)
             .map_err(|e| IoError::other(format!("failed to format timestamp: {e}")))?;
-        let rollout_item = rollout_item.clone().with_stable_response_item_ids();
-
         let line = RolloutLineRef {
             timestamp,
-            item: &rollout_item,
+            item: rollout_item,
         };
         let mut value = serde_json::to_value(line)?;
         rollout_item.attach_response_item_ids_to_json(&mut value);

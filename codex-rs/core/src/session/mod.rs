@@ -1219,11 +1219,7 @@ impl Session {
             }
             InitialHistory::Resumed(resumed_history) => {
                 let turn_context = self.new_default_turn().await;
-                let rollout_items = resumed_history
-                    .history
-                    .into_iter()
-                    .map(RolloutItem::with_stable_response_item_ids)
-                    .collect::<Vec<_>>();
+                let rollout_items = resumed_history.history;
                 let previous_turn_settings = self
                     .apply_rollout_reconstruction(&turn_context, &rollout_items)
                     .await;
@@ -1263,10 +1259,6 @@ impl Session {
             }
             InitialHistory::Forked(rollout_items) => {
                 let turn_context = self.new_default_turn().await;
-                let rollout_items = rollout_items
-                    .into_iter()
-                    .map(RolloutItem::with_stable_response_item_ids)
-                    .collect::<Vec<_>>();
                 self.apply_rollout_reconstruction(&turn_context, &rollout_items)
                     .await;
 
@@ -2589,7 +2581,7 @@ impl Session {
         let items: Vec<ResponseItem> = items
             .iter()
             .cloned()
-            .map(ResponseItem::with_stable_id)
+            .map(ResponseItem::with_client_generated_id)
             .collect();
         {
             let mut state = self.state.lock().await;
@@ -2667,19 +2659,8 @@ impl Session {
     ) {
         let replacement_history_matches_items =
             compacted_item.replacement_history.as_ref() == Some(&items);
-        let items: Vec<ResponseItem> = items
-            .into_iter()
-            .map(ResponseItem::with_stable_id)
-            .collect();
         if replacement_history_matches_items {
             compacted_item.replacement_history = Some(items.clone());
-        } else if let Some(replacement_history) = compacted_item.replacement_history.take() {
-            compacted_item.replacement_history = Some(
-                replacement_history
-                    .into_iter()
-                    .map(ResponseItem::with_stable_id)
-                    .collect(),
-            );
         }
         {
             let mut state = self.state.lock().await;
@@ -2992,13 +2973,8 @@ impl Session {
     }
 
     pub(crate) async fn persist_rollout_items(&self, items: &[RolloutItem]) {
-        let items = items
-            .iter()
-            .cloned()
-            .map(RolloutItem::with_stable_response_item_ids)
-            .collect::<Vec<_>>();
         if let Some(live_thread) = self.live_thread()
-            && let Err(e) = live_thread.append_items(&items).await
+            && let Err(e) = live_thread.append_items(items).await
         {
             error!("failed to record rollout items: {e:#}");
         }

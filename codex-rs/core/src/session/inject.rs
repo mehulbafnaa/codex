@@ -20,17 +20,17 @@ impl Session {
         &self,
         input: Vec<ResponseItem>,
     ) -> Result<(), Vec<ResponseItem>> {
+        let input = input
+            .into_iter()
+            .map(ResponseItem::with_client_generated_id)
+            .collect::<Vec<_>>();
         let mut active = self.active_turn.lock().await;
         match active.as_mut() {
             Some(active_turn) => {
                 self.input_queue
                     .extend_pending_input_for_turn_state(
                         active_turn.turn_state.as_ref(),
-                        input
-                            .into_iter()
-                            .map(ResponseItem::with_stable_id)
-                            .map(TurnInput::ResponseItem)
-                            .collect(),
+                        input.into_iter().map(TurnInput::ResponseItem).collect(),
                     )
                     .await;
                 Ok(())
@@ -50,6 +50,10 @@ impl Session {
         self: &Arc<Self>,
         input: Vec<ResponseItem>,
     ) -> Result<(), TryStartTurnIfIdleError> {
+        let input = input
+            .into_iter()
+            .map(ResponseItem::with_client_generated_id)
+            .collect::<Vec<_>>();
         if input.is_empty() {
             return Ok(());
         }

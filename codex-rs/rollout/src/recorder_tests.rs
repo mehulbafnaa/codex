@@ -468,6 +468,12 @@ async fn recorder_persists_response_item_ids_in_rollout_history() -> std::io::Re
         content: Vec::new(),
         phase: None,
     };
+    let historical_user = ResponseItem::Message {
+        id: None,
+        role: "user".to_string(),
+        content: Vec::new(),
+        phase: None,
+    };
     let compacted = RolloutItem::Compacted(CompactedItem {
         message: "summary".to_string(),
         replacement_history: Some(vec![
@@ -485,7 +491,11 @@ async fn recorder_persists_response_item_ids_in_rollout_history() -> std::io::Re
     });
 
     recorder
-        .record_canonical_items(&[RolloutItem::ResponseItem(top_level), compacted])
+        .record_canonical_items(&[
+            RolloutItem::ResponseItem(top_level),
+            RolloutItem::ResponseItem(historical_user.clone()),
+            compacted,
+        ])
         .await?;
     recorder.flush().await?;
 
@@ -500,7 +510,11 @@ async fn recorder_persists_response_item_ids_in_rollout_history() -> std::io::Re
             ..
         }) if id == "msg_top_level"
     ));
-    let RolloutItem::Compacted(compacted) = &items[2] else {
+    let RolloutItem::ResponseItem(loaded_historical_user) = &items[2] else {
+        panic!("expected historical response item");
+    };
+    assert_eq!(loaded_historical_user, &historical_user);
+    let RolloutItem::Compacted(compacted) = &items[3] else {
         panic!("expected compacted item");
     };
     assert_eq!(

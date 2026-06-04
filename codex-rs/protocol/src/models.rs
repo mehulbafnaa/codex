@@ -931,64 +931,40 @@ pub enum ResponseItem {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ResponseItemIdKind {
+pub enum ClientGeneratedResponseItemIdKind {
     Message,
-    Reasoning,
-    LocalShellCall,
-    FunctionCall,
-    ToolSearchCall,
     FunctionCallOutput,
-    CustomToolCall,
     CustomToolCallOutput,
     ToolSearchOutput,
-    WebSearchCall,
-    ImageGenerationCall,
-    Compaction,
 }
 
-impl ResponseItemIdKind {
+impl ClientGeneratedResponseItemIdKind {
     fn prefix(self) -> &'static str {
         match self {
             Self::Message => "msg",
-            Self::Reasoning => "rs",
-            Self::LocalShellCall => "sh",
-            Self::FunctionCall => "fc",
-            Self::ToolSearchCall => "tsc",
             Self::FunctionCallOutput => "fco",
-            Self::CustomToolCall => "ctc",
             Self::CustomToolCallOutput => "ctco",
             Self::ToolSearchOutput => "tso",
-            Self::WebSearchCall => "ws",
-            Self::ImageGenerationCall => "ig",
-            Self::Compaction => "cmp",
         }
     }
 }
 
-pub fn new_response_item_id(kind: ResponseItemIdKind) -> String {
+pub fn new_client_generated_response_item_id(kind: ClientGeneratedResponseItemIdKind) -> String {
     format!("{}_{}", kind.prefix(), Uuid::new_v4().simple())
 }
 
-fn stable_optional_response_item_id(
+fn client_generated_response_item_id(
     id: Option<String>,
-    kind: ResponseItemIdKind,
+    kind: ClientGeneratedResponseItemIdKind,
 ) -> Option<String> {
     Some(
         id.filter(|id| !id.is_empty())
-            .unwrap_or_else(|| new_response_item_id(kind)),
+            .unwrap_or_else(|| new_client_generated_response_item_id(kind)),
     )
 }
 
-fn stable_response_item_id(id: String, kind: ResponseItemIdKind) -> String {
-    if id.is_empty() {
-        new_response_item_id(kind)
-    } else {
-        id
-    }
-}
-
 impl ResponseInputItem {
-    pub fn with_stable_id(self) -> Self {
+    pub fn with_client_generated_id(self) -> Self {
         match self {
             Self::Message {
                 id,
@@ -996,7 +972,10 @@ impl ResponseInputItem {
                 content,
                 phase,
             } => Self::Message {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::Message),
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::Message,
+                ),
                 role,
                 content,
                 phase,
@@ -1006,7 +985,10 @@ impl ResponseInputItem {
                 call_id,
                 output,
             } => Self::FunctionCallOutput {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCallOutput),
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::FunctionCallOutput,
+                ),
                 call_id,
                 output,
             },
@@ -1015,7 +997,10 @@ impl ResponseInputItem {
                 call_id,
                 output,
             } => Self::McpToolCallOutput {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCallOutput),
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::FunctionCallOutput,
+                ),
                 call_id,
                 output,
             },
@@ -1025,7 +1010,10 @@ impl ResponseInputItem {
                 name,
                 output,
             } => Self::CustomToolCallOutput {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::CustomToolCallOutput),
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::CustomToolCallOutput,
+                ),
                 call_id,
                 name,
                 output,
@@ -1037,7 +1025,10 @@ impl ResponseInputItem {
                 execution,
                 tools,
             } => Self::ToolSearchOutput {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::ToolSearchOutput),
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::ToolSearchOutput,
+                ),
                 call_id,
                 status,
                 execution,
@@ -1048,88 +1039,37 @@ impl ResponseInputItem {
 }
 
 impl ResponseItem {
-    pub fn with_stable_id(self) -> Self {
+    /// Ensures a newly created Codex-originated item has a stable Responses API ID.
+    ///
+    /// Do not use this for items loaded from rollout history: missing historical IDs must remain
+    /// omitted so replay does not invent new identities.
+    pub fn with_client_generated_id(self) -> Self {
         match self {
             Self::Message {
                 id,
                 role,
                 content,
                 phase,
-            } => Self::Message {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::Message),
+            } if role != "assistant" => Self::Message {
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::Message,
+                ),
                 role,
                 content,
                 phase,
-            },
-            Self::Reasoning {
-                id,
-                summary,
-                content,
-                encrypted_content,
-            } => Self::Reasoning {
-                id: stable_response_item_id(id, ResponseItemIdKind::Reasoning),
-                summary,
-                content,
-                encrypted_content,
-            },
-            Self::LocalShellCall {
-                id,
-                call_id,
-                status,
-                action,
-            } => Self::LocalShellCall {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::LocalShellCall),
-                call_id,
-                status,
-                action,
-            },
-            Self::FunctionCall {
-                id,
-                name,
-                namespace,
-                arguments,
-                call_id,
-            } => Self::FunctionCall {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCall),
-                name,
-                namespace,
-                arguments,
-                call_id,
-            },
-            Self::ToolSearchCall {
-                id,
-                call_id,
-                status,
-                execution,
-                arguments,
-            } => Self::ToolSearchCall {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::ToolSearchCall),
-                call_id,
-                status,
-                execution,
-                arguments,
             },
             Self::FunctionCallOutput {
                 id,
                 call_id,
                 output,
             } => Self::FunctionCallOutput {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::FunctionCallOutput),
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::FunctionCallOutput,
+                ),
                 call_id,
                 output,
-            },
-            Self::CustomToolCall {
-                id,
-                status,
-                call_id,
-                name,
-                input,
-            } => Self::CustomToolCall {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::CustomToolCall),
-                status,
-                call_id,
-                name,
-                input,
             },
             Self::CustomToolCallOutput {
                 id,
@@ -1137,7 +1077,10 @@ impl ResponseItem {
                 name,
                 output,
             } => Self::CustomToolCallOutput {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::CustomToolCallOutput),
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::CustomToolCallOutput,
+                ),
                 call_id,
                 name,
                 output,
@@ -1148,37 +1091,17 @@ impl ResponseItem {
                 status,
                 execution,
                 tools,
-            } => Self::ToolSearchOutput {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::ToolSearchOutput),
+            } if execution == "client" => Self::ToolSearchOutput {
+                id: client_generated_response_item_id(
+                    id,
+                    ClientGeneratedResponseItemIdKind::ToolSearchOutput,
+                ),
                 call_id,
                 status,
                 execution,
                 tools,
             },
-            Self::WebSearchCall { id, status, action } => Self::WebSearchCall {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::WebSearchCall),
-                status,
-                action,
-            },
-            Self::ImageGenerationCall {
-                id,
-                status,
-                revised_prompt,
-                result,
-            } => Self::ImageGenerationCall {
-                id: stable_response_item_id(id, ResponseItemIdKind::ImageGenerationCall),
-                status,
-                revised_prompt,
-                result,
-            },
-            Self::Compaction {
-                id,
-                encrypted_content,
-            } => Self::Compaction {
-                id: stable_optional_response_item_id(id, ResponseItemIdKind::Compaction),
-                encrypted_content,
-            },
-            Self::CompactionTrigger | Self::ContextCompaction { .. } | Self::Other => self,
+            item => item,
         }
     }
 
@@ -1438,7 +1361,7 @@ pub fn local_image_content_items_with_label_number(
 
 impl From<ResponseInputItem> for ResponseItem {
     fn from(item: ResponseInputItem) -> Self {
-        match item.with_stable_id() {
+        match item.with_client_generated_id() {
             ResponseInputItem::Message {
                 id,
                 role,
@@ -2069,39 +1992,72 @@ mod tests {
     }
 
     #[test]
-    fn new_response_item_ids_use_responses_api_prefixes() {
+    fn new_client_generated_response_item_ids_use_responses_api_prefixes() {
         for (kind, prefix) in [
-            (ResponseItemIdKind::Message, "msg"),
-            (ResponseItemIdKind::Reasoning, "rs"),
-            (ResponseItemIdKind::LocalShellCall, "sh"),
-            (ResponseItemIdKind::FunctionCall, "fc"),
-            (ResponseItemIdKind::ToolSearchCall, "tsc"),
-            (ResponseItemIdKind::FunctionCallOutput, "fco"),
-            (ResponseItemIdKind::CustomToolCall, "ctc"),
-            (ResponseItemIdKind::CustomToolCallOutput, "ctco"),
-            (ResponseItemIdKind::ToolSearchOutput, "tso"),
-            (ResponseItemIdKind::WebSearchCall, "ws"),
-            (ResponseItemIdKind::ImageGenerationCall, "ig"),
-            (ResponseItemIdKind::Compaction, "cmp"),
+            (ClientGeneratedResponseItemIdKind::Message, "msg"),
+            (ClientGeneratedResponseItemIdKind::FunctionCallOutput, "fco"),
+            (
+                ClientGeneratedResponseItemIdKind::CustomToolCallOutput,
+                "ctco",
+            ),
+            (ClientGeneratedResponseItemIdKind::ToolSearchOutput, "tso"),
         ] {
-            let id = new_response_item_id(kind);
+            let id = new_client_generated_response_item_id(kind);
             assert!(id.starts_with(&format!("{prefix}_")), "unexpected id: {id}");
         }
     }
 
     #[test]
-    fn stable_response_item_ids_replace_empty_ids() {
+    fn client_generated_response_item_ids_replace_empty_ids() {
         let ResponseItem::Message { id: Some(id), .. } = ResponseItem::Message {
             id: Some(String::new()),
             role: "user".to_string(),
             content: Vec::new(),
             phase: None,
         }
-        .with_stable_id() else {
+        .with_client_generated_id() else {
             panic!("expected message id");
         };
 
         assert!(id.starts_with("msg_"));
+    }
+
+    #[test]
+    fn server_generated_response_items_keep_missing_ids() {
+        let assistant_message = ResponseItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: Vec::new(),
+            phase: None,
+        };
+        let reasoning = ResponseItem::Reasoning {
+            id: String::new(),
+            summary: Vec::new(),
+            content: None,
+            encrypted_content: Some("opaque".to_string()),
+        };
+        let compaction = ResponseItem::Compaction {
+            id: None,
+            encrypted_content: "opaque".to_string(),
+        };
+        let server_tool_search_output = ResponseItem::ToolSearchOutput {
+            id: None,
+            call_id: Some("call_search".to_string()),
+            status: "completed".to_string(),
+            execution: "server".to_string(),
+            tools: Vec::new(),
+        };
+
+        assert_eq!(
+            assistant_message.clone().with_client_generated_id(),
+            assistant_message
+        );
+        assert_eq!(reasoning.clone().with_client_generated_id(), reasoning);
+        assert_eq!(compaction.clone().with_client_generated_id(), compaction);
+        assert_eq!(
+            server_tool_search_output.clone().with_client_generated_id(),
+            server_tool_search_output
+        );
     }
 
     #[test]
@@ -2122,7 +2078,7 @@ mod tests {
                 encrypted_content: None,
             },
             ResponseItem::LocalShellCall {
-                id: Some("sh_1".to_string()),
+                id: Some("lsh_1".to_string()),
                 call_id: Some("call_shell".to_string()),
                 status: LocalShellStatus::Completed,
                 action: LocalShellAction::Exec(LocalShellExecAction {
@@ -2206,7 +2162,7 @@ mod tests {
         assert_eq!(
             ids,
             vec![
-                "msg_1", "rs_1", "sh_1", "fc_1", "tsc_1", "fco_1", "ctc_1", "ctco_1", "tso_1",
+                "msg_1", "rs_1", "lsh_1", "fc_1", "tsc_1", "fco_1", "ctc_1", "ctco_1", "tso_1",
                 "ws_1", "ig_1", "cmp_1",
             ]
         );

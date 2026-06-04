@@ -2854,24 +2854,6 @@ pub enum RolloutItem {
 }
 
 impl RolloutItem {
-    pub fn with_stable_response_item_ids(self) -> Self {
-        match self {
-            Self::ResponseItem(item) => Self::ResponseItem(item.with_stable_id()),
-            Self::Compacted(mut compacted) => {
-                if let Some(replacement_history) = compacted.replacement_history.take() {
-                    compacted.replacement_history = Some(
-                        replacement_history
-                            .into_iter()
-                            .map(ResponseItem::with_stable_id)
-                            .collect(),
-                    );
-                }
-                Self::Compacted(compacted)
-            }
-            Self::SessionMeta(_) | Self::TurnContext(_) | Self::EventMsg(_) => self,
-        }
-    }
-
     pub fn attach_response_item_ids_to_json(&self, value: &mut Value) {
         let Some(payload) = value.get_mut("payload") else {
             return;
@@ -2908,14 +2890,14 @@ pub struct CompactedItem {
 
 impl From<CompactedItem> for ResponseItem {
     fn from(value: CompactedItem) -> Self {
-        ResponseItem::Message {
+        ResponseItem::from(ResponseInputItem::Message {
             id: None,
             role: "assistant".to_string(),
             content: vec![ContentItem::OutputText {
                 text: value.message,
             }],
             phase: None,
-        }
+        })
     }
 }
 

@@ -1713,6 +1713,42 @@ async fn record_initial_history_reconstructs_resumed_transcript() {
     assert_response_items_eq_ignoring_ids(history.raw_items(), &expected);
 }
 
+#[tokio::test]
+async fn record_initial_history_preserves_missing_historical_response_item_ids() {
+    let (session, _turn_context) = make_session_and_context().await;
+    let expected = vec![
+        ResponseItem::Message {
+            id: None,
+            role: "user".to_string(),
+            content: vec![ContentItem::InputText {
+                text: "legacy user message".to_string(),
+            }],
+            phase: None,
+        },
+        ResponseItem::FunctionCallOutput {
+            id: None,
+            call_id: "legacy_call".to_string(),
+            output: FunctionCallOutputPayload::from_text("legacy output".to_string()),
+        },
+    ];
+    let rollout_items = expected
+        .iter()
+        .cloned()
+        .map(RolloutItem::ResponseItem)
+        .collect();
+
+    session
+        .record_initial_history(InitialHistory::Resumed(ResumedHistory {
+            conversation_id: ThreadId::default(),
+            history: rollout_items,
+            rollout_path: Some(PathBuf::from("/tmp/resume.jsonl")),
+        }))
+        .await;
+
+    let history = session.state.lock().await.clone_history();
+    assert_eq!(history.raw_items(), expected.as_slice());
+}
+
 #[test]
 fn resolve_multi_agent_version_handles_unset_and_legacy_history() {
     let thread_id = ThreadId::default();
@@ -10453,7 +10489,7 @@ async fn sample_rollout(
     }
     let initial_context = initial_context
         .into_iter()
-        .map(ResponseItem::with_stable_id)
+        .map(ResponseItem::with_client_generated_id)
         .collect::<Vec<_>>();
     for item in &initial_context {
         rollout_items.push(RolloutItem::ResponseItem(item.clone()));
@@ -10471,7 +10507,7 @@ async fn sample_rollout(
         }],
         phase: None,
     }
-    .with_stable_id();
+    .with_client_generated_id();
     live_history.record_items(
         std::iter::once(&user1),
         reconstruction_turn.truncation_policy,
@@ -10486,7 +10522,7 @@ async fn sample_rollout(
         }],
         phase: None,
     }
-    .with_stable_id();
+    .with_client_generated_id();
     live_history.record_items(
         std::iter::once(&assistant1),
         reconstruction_turn.truncation_policy,
@@ -10500,7 +10536,7 @@ async fn sample_rollout(
     let user_messages1 = collect_user_messages(&snapshot1);
     let rebuilt1 = compact::build_compacted_history(Vec::new(), &user_messages1, summary1)
         .into_iter()
-        .map(ResponseItem::with_stable_id)
+        .map(ResponseItem::with_client_generated_id)
         .collect::<Vec<_>>();
     live_history.replace(rebuilt1.clone());
     rollout_items.push(RolloutItem::Compacted(CompactedItem {
@@ -10516,7 +10552,7 @@ async fn sample_rollout(
         }],
         phase: None,
     }
-    .with_stable_id();
+    .with_client_generated_id();
     live_history.record_items(
         std::iter::once(&user2),
         reconstruction_turn.truncation_policy,
@@ -10531,7 +10567,7 @@ async fn sample_rollout(
         }],
         phase: None,
     }
-    .with_stable_id();
+    .with_client_generated_id();
     live_history.record_items(
         std::iter::once(&assistant2),
         reconstruction_turn.truncation_policy,
@@ -10545,7 +10581,7 @@ async fn sample_rollout(
     let user_messages2 = collect_user_messages(&snapshot2);
     let rebuilt2 = compact::build_compacted_history(Vec::new(), &user_messages2, summary2)
         .into_iter()
-        .map(ResponseItem::with_stable_id)
+        .map(ResponseItem::with_client_generated_id)
         .collect::<Vec<_>>();
     live_history.replace(rebuilt2.clone());
     rollout_items.push(RolloutItem::Compacted(CompactedItem {
@@ -10561,7 +10597,7 @@ async fn sample_rollout(
         }],
         phase: None,
     }
-    .with_stable_id();
+    .with_client_generated_id();
     live_history.record_items(
         std::iter::once(&user3),
         reconstruction_turn.truncation_policy,
@@ -10576,7 +10612,7 @@ async fn sample_rollout(
         }],
         phase: None,
     }
-    .with_stable_id();
+    .with_client_generated_id();
     live_history.record_items(
         std::iter::once(&assistant3),
         reconstruction_turn.truncation_policy,
