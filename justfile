@@ -36,6 +36,12 @@ fmt:
     uv run --frozen --project ../sdk/python --extra dev ruff check --fix --fix-only ../sdk/python
     uv run --frozen --project ../sdk/python --extra dev ruff format ../sdk/python
 
+# Check formatting without modifying files.
+fmt-check:
+    cargo fmt -- --check --config imports_granularity=Item 2>/dev/null
+    uv run --frozen --project ../sdk/python --extra dev ruff check --diff ../sdk/python
+    uv run --frozen --project ../sdk/python --extra dev ruff format --check ../sdk/python
+
 fix *args:
     cargo clippy --fix --tests --allow-dirty "$@"
 
