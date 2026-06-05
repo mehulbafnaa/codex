@@ -916,7 +916,7 @@ pub enum ResponseItem {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ClientGeneratedResponseItemIdKind {
+enum ClientGeneratedResponseItemIdKind {
     Message,
     FunctionCallOutput,
     CustomToolCallOutput,
@@ -934,7 +934,7 @@ impl ClientGeneratedResponseItemIdKind {
     }
 }
 
-pub fn new_client_generated_response_item_id(kind: ClientGeneratedResponseItemIdKind) -> String {
+fn new_client_generated_response_item_id(kind: ClientGeneratedResponseItemIdKind) -> String {
     format!("{}_{}", kind.prefix(), Uuid::new_v4().simple())
 }
 
@@ -949,18 +949,19 @@ fn client_generated_response_item_id(
 }
 
 impl ResponseItem {
-    /// Ensures a newly created Codex-originated item has a stable Responses API ID.
+    /// Ensures a newly created Codex-owned message has a stable Responses API ID.
     ///
-    /// Do not use this for items loaded from rollout history: missing historical IDs must remain
-    /// omitted so replay does not invent new identities.
-    pub fn with_new_client_generated_id_if_missing(self) -> Self {
+    /// Use this for synthetic messages Codex authors directly, including assistant-role messages
+    /// such as `/review` exit messages. Do not use it for assistant messages loaded from rollout
+    /// history or returned by the model, where a missing historical ID must remain omitted.
+    pub fn with_new_client_generated_message_id_if_missing(self) -> Self {
         match self {
             Self::Message {
                 id,
                 role,
                 content,
                 phase,
-            } if role != "assistant" => Self::Message {
+            } => Self::Message {
                 id: client_generated_response_item_id(
                     id,
                     ClientGeneratedResponseItemIdKind::Message,
@@ -969,6 +970,19 @@ impl ResponseItem {
                 content,
                 phase,
             },
+            item => item,
+        }
+    }
+
+    /// Ensures a newly created Codex-originated item has a stable Responses API ID.
+    ///
+    /// Do not use this for items loaded from rollout history: missing historical IDs must remain
+    /// omitted so replay does not invent new identities.
+    pub fn with_new_client_generated_id_if_missing(self) -> Self {
+        match self {
+            item @ Self::Message { ref role, .. } if role != "assistant" => {
+                item.with_new_client_generated_message_id_if_missing()
+            }
             Self::FunctionCallOutput {
                 id,
                 call_id,
@@ -1048,17 +1062,17 @@ impl ResponseItem {
     }
 }
 
-pub fn attach_response_item_ids(values: &mut [Value], items: &[ResponseItem]) {
+pub(crate) fn attach_all_response_item_ids(values: &mut [Value], items: &[ResponseItem]) {
     for (value, item) in values.iter_mut().zip(items) {
         item.attach_id_to_json(value);
     }
 }
 
-pub fn attach_response_item_ids_to_input(payload_json: &mut Value, items: &[ResponseItem]) {
+pub fn attach_all_response_item_ids_to_input(payload_json: &mut Value, items: &[ResponseItem]) {
     let Some(Value::Array(values)) = payload_json.get_mut("input") else {
         return;
     };
-    attach_response_item_ids(values, items);
+    attach_all_response_item_ids(values, items);
 }
 
 pub const BASE_INSTRUCTIONS_DEFAULT: &str = include_str!("prompts/base_instructions/default.md");
@@ -1918,6 +1932,21 @@ mod tests {
     }
 
     #[test]
+    fn synthetic_assistant_messages_can_get_client_generated_ids() {
+        let ResponseItem::Message { id: Some(id), .. } = ResponseItem::Message {
+            id: None,
+            role: "assistant".to_string(),
+            content: Vec::new(),
+            phase: None,
+        }
+        .with_new_client_generated_message_id_if_missing() else {
+            panic!("expected message id");
+        };
+
+        assert!(id.starts_with("msg_"));
+    }
+
+    #[test]
     fn server_generated_response_items_keep_missing_ids() {
         let assistant_message = ResponseItem::Message {
             id: None,
@@ -2056,7 +2085,7 @@ mod tests {
             "input": serde_json::to_value(&items).expect("serialize input"),
         });
 
-        attach_response_item_ids_to_input(&mut payload, &items);
+        attach_all_response_item_ids_to_input(&mut payload, &items);
 
         let ids = payload["input"]
             .as_array()
@@ -2085,7 +2114,7 @@ mod tests {
             "input": serde_json::to_value(&items).expect("serialize input"),
         });
 
-        attach_response_item_ids_to_input(&mut payload, &items);
+        attach_all_response_item_ids_to_input(&mut payload, &items);
 
         assert_eq!(payload["input"][0].get("id"), None);
     }

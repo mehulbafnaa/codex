@@ -106,22 +106,12 @@ fn test_model_client_with_provider_and_parent(
 }
 
 #[test]
-fn response_item_ids_are_limited_to_openai_and_azure() {
+fn response_item_ids_are_limited_to_openai() {
     let openai_client = test_model_client_with_provider(
         ModelProviderInfo::create_openai_provider(Some("https://example.com/v1".to_string())),
         SessionSource::Exec,
     );
-    let openai_provider = openai_client
-        .state
-        .provider
-        .info()
-        .to_api_provider(None)
-        .expect("openai provider");
-    assert!(
-        openai_client
-            .new_session()
-            .should_include_response_item_ids(&openai_provider)
-    );
+    assert!(openai_client.should_include_response_item_ids());
 
     let azure_client = test_model_client_with_provider(
         ModelProviderInfo {
@@ -130,30 +120,10 @@ fn response_item_ids_are_limited_to_openai_and_azure() {
         },
         SessionSource::Exec,
     );
-    let azure_provider = azure_client
-        .state
-        .provider
-        .info()
-        .to_api_provider(None)
-        .expect("azure provider");
-    assert!(
-        azure_client
-            .new_session()
-            .should_include_response_item_ids(&azure_provider)
-    );
+    assert!(!azure_client.should_include_response_item_ids());
 
     let custom_client = test_model_client(SessionSource::Exec);
-    let custom_provider = custom_client
-        .state
-        .provider
-        .info()
-        .to_api_provider(None)
-        .expect("custom provider");
-    assert!(
-        !custom_client
-            .new_session()
-            .should_include_response_item_ids(&custom_provider)
-    );
+    assert!(!custom_client.should_include_response_item_ids());
 }
 
 fn test_model_info() -> ModelInfo {

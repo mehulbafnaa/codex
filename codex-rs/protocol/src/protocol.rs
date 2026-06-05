@@ -42,7 +42,7 @@ use crate::models::ResponseInputItem;
 use crate::models::ResponseItem;
 use crate::models::SandboxEnforcement;
 use crate::models::WebSearchAction;
-use crate::models::attach_response_item_ids;
+use crate::models::attach_all_response_item_ids;
 use crate::num_format::format_with_separators;
 use crate::openai_models::ReasoningEffort as ReasoningEffortConfig;
 use crate::parse_command::ParsedCommand;
@@ -2867,7 +2867,7 @@ impl RolloutItem {
                 let Some(Value::Array(values)) = payload.get_mut("replacement_history") else {
                     return;
                 };
-                attach_response_item_ids(values, items);
+                attach_all_response_item_ids(values, items);
             }
             Self::SessionMeta(_)
             | Self::Compacted(CompactedItem {

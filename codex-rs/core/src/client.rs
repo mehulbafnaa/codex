@@ -529,7 +529,7 @@ impl ModelClient {
             .api_provider
             .stream_idle_timeout
             .saturating_mul(COMPACT_REQUEST_TIMEOUT_IDLE_MULTIPLIER);
-        let include_item_ids = self.should_include_response_item_ids(&client_setup.api_provider);
+        let include_item_ids = self.should_include_response_item_ids();
         let client =
             ApiCompactClient::new(transport, client_setup.api_provider, client_setup.api_auth)
                 .with_telemetry(Some(request_telemetry));
@@ -797,8 +797,8 @@ impl ModelClient {
         Ok(request)
     }
 
-    fn should_include_response_item_ids(&self, provider: &ApiProvider) -> bool {
-        self.state.provider.info().is_openai() || provider.is_azure_responses_endpoint()
+    fn should_include_response_item_ids(&self) -> bool {
+        self.state.provider.info().is_openai()
     }
 
     /// Returns whether the Responses-over-WebSocket transport is active for this session.
@@ -1223,10 +1223,6 @@ impl ModelClientSession {
         }
     }
 
-    fn should_include_response_item_ids(&self, provider: &ApiProvider) -> bool {
-        self.client.should_include_response_item_ids(provider)
-    }
-
     /// Streams a turn via the OpenAI Responses API.
     ///
     /// Handles reasoning summaries, verbosity, and the `text` controls used for output schemas.
@@ -1275,8 +1271,7 @@ impl ModelClientSession {
                 self.client.state.auth_env_telemetry.clone(),
             );
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
-            let include_item_ids =
-                self.should_include_response_item_ids(&client_setup.api_provider);
+            let include_item_ids = self.client.should_include_response_item_ids();
             let mut options = self
                 .build_responses_options(turn_metadata_header, compression, include_item_ids)
                 .await;
@@ -1386,8 +1381,7 @@ impl ModelClientSession {
                 pending_retry,
             );
             let compression = self.responses_request_compression(client_setup.auth.as_ref());
-            let include_item_ids =
-                self.should_include_response_item_ids(&client_setup.api_provider);
+            let include_item_ids = self.client.should_include_response_item_ids();
 
             let options = self
                 .build_responses_options(turn_metadata_header, compression, include_item_ids)

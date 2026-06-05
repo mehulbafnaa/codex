@@ -4,10 +4,8 @@ use codex_prompts::render_review_exit_interrupted;
 use codex_prompts::render_review_exit_success;
 use codex_protocol::config_types::WebSearchMode;
 use codex_protocol::items::TurnItem;
-use codex_protocol::models::ClientGeneratedResponseItemIdKind;
 use codex_protocol::models::ContentItem;
 use codex_protocol::models::ResponseItem;
-use codex_protocol::models::new_client_generated_response_item_id;
 use codex_protocol::protocol::AgentMessageContentDeltaEvent;
 use codex_protocol::protocol::AskForApproval;
 use codex_protocol::protocol::Event;
@@ -243,13 +241,12 @@ pub(crate) async fn exit_review_mode(
         .record_conversation_items(
             &ctx,
             &[ResponseItem::Message {
-                id: Some(new_client_generated_response_item_id(
-                    ClientGeneratedResponseItemIdKind::Message,
-                )),
+                id: None,
                 role: "user".to_string(),
                 content: vec![ContentItem::InputText { text: user_message }],
                 phase: None,
-            }],
+            }
+            .with_new_client_generated_message_id_if_missing()],
         )
         .await;
 
@@ -263,15 +260,14 @@ pub(crate) async fn exit_review_mode(
         .record_response_item_and_emit_turn_item(
             ctx.as_ref(),
             ResponseItem::Message {
-                id: Some(new_client_generated_response_item_id(
-                    ClientGeneratedResponseItemIdKind::Message,
-                )),
+                id: None,
                 role: "assistant".to_string(),
                 content: vec![ContentItem::OutputText {
                     text: assistant_message,
                 }],
                 phase: None,
-            },
+            }
+            .with_new_client_generated_message_id_if_missing(),
         )
         .await;
 

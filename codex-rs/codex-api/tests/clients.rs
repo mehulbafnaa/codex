@@ -20,6 +20,7 @@ use codex_client::Response;
 use codex_client::StreamResponse;
 use codex_client::TransportError;
 use codex_protocol::models::ContentItem;
+use codex_protocol::models::FunctionCallOutputPayload;
 use codex_protocol::models::ResponseItem;
 use codex_protocol::protocol::SessionSource;
 use codex_protocol::protocol::SubAgentSource;
@@ -419,12 +420,19 @@ async fn azure_default_store_attaches_ids_and_headers() -> Result<()> {
     let request = ResponsesApiRequest {
         model: "gpt-test".into(),
         instructions: "Say hi".into(),
-        input: vec![ResponseItem::Message {
-            id: Some("msg_1".into()),
-            role: "user".into(),
-            content: vec![ContentItem::InputText { text: "hi".into() }],
-            phase: None,
-        }],
+        input: vec![
+            ResponseItem::Message {
+                id: Some("msg_1".into()),
+                role: "user".into(),
+                content: vec![ContentItem::InputText { text: "hi".into() }],
+                phase: None,
+            },
+            ResponseItem::FunctionCallOutput {
+                id: Some("fco_1".into()),
+                call_id: "call_1".into(),
+                output: FunctionCallOutputPayload::from_text("ok".into()),
+            },
+        ],
         tools: Vec::new(),
         tool_choice: "auto".into(),
         parallel_tool_calls: false,
@@ -486,15 +494,26 @@ async fn azure_default_store_attaches_ids_and_headers() -> Result<()> {
         Some("present")
     );
 
-    let input_id = req
+    let input = req
         .body
         .as_ref()
         .and_then(RequestBody::json)
         .and_then(|body| body.get("input"))
-        .and_then(|input| input.get(0))
-        .and_then(|item| item.get("id"))
-        .and_then(|id| id.as_str());
-    assert_eq!(input_id, Some("msg_1"));
+        .expect("input array");
+    assert_eq!(
+        input
+            .get(0)
+            .and_then(|item| item.get("id"))
+            .and_then(|id| id.as_str()),
+        Some("msg_1")
+    );
+    assert_eq!(
+        input
+            .get(1)
+            .and_then(|item| item.get("id"))
+            .and_then(|id| id.as_str()),
+        None
+    );
 
     Ok(())
 }

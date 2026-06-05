@@ -10,7 +10,7 @@ use crate::sse::process_responses_event;
 use crate::telemetry::WebsocketTelemetry;
 use codex_client::TransportError;
 use codex_client::maybe_build_rustls_client_config_with_custom_ca;
-use codex_protocol::models::attach_response_item_ids_to_input;
+use codex_protocol::models::attach_all_response_item_ids_to_input;
 use codex_utils_rustls_provider::ensure_rustls_crypto_provider;
 use futures::SinkExt;
 use futures::StreamExt;
@@ -230,7 +230,7 @@ impl ResponsesWebsocketConnection {
             ApiError::Stream(format!("failed to encode websocket request: {err}"))
         })?;
         if include_item_ids && let ResponsesWsRequest::ResponseCreate(request) = &request {
-            attach_response_item_ids_to_input(&mut request_body, &request.input);
+            attach_all_response_item_ids_to_input(&mut request_body, &request.input);
         }
 
         let current_span = Span::current();
