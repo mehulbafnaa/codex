@@ -47,7 +47,9 @@ fn text_user_input_parts(texts: Vec<String>) -> serde_json::Value {
 }
 
 fn generated_message_id(item: &serde_json::Value) -> &str {
-    let id = item["id"].as_str().expect("message id");
+    let Some(id) = item["id"].as_str() else {
+        panic!("message id");
+    };
     assert!(id.starts_with("msg_"));
     id
 }
