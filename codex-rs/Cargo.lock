@@ -1926,6 +1926,7 @@ dependencies = [
  "codex-file-search",
  "codex-file-watcher",
  "codex-git-utils",
+ "codex-goal-extension",
  "codex-guardian",
  "codex-hooks",
  "codex-image-generation-extension",
@@ -2789,6 +2790,7 @@ dependencies = [
  "codex-file-system",
  "codex-protocol",
  "codex-sandboxing",
+ "codex-shell-command",
  "codex-test-binary-support",
  "codex-utils-absolute-path",
  "codex-utils-pty",
@@ -3597,6 +3599,7 @@ dependencies = [
  "urlencoding",
  "webbrowser",
  "which 8.0.0",
+ "wiremock",
 ]
 
 [[package]]
@@ -3691,6 +3694,7 @@ dependencies = [
  "base64 0.22.1",
  "codex-protocol",
  "codex-utils-absolute-path",
+ "libc",
  "once_cell",
  "pretty_assertions",
  "regex",

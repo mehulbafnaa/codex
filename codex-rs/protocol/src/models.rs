@@ -717,6 +717,12 @@ pub enum ContentItem {
     },
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
+#[serde(tag = "type", rename_all = "snake_case")]
+pub enum AgentMessageInputContent {
+    EncryptedContent { encrypted_content: String },
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, JsonSchema, TS)]
 #[serde(rename_all = "lowercase")]
 pub enum ImageDetail {
@@ -759,6 +765,11 @@ pub enum ResponseItem {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         #[ts(optional)]
         phase: Option<MessagePhase>,
+    },
+    AgentMessage {
+        author: String,
+        recipient: String,
+        content: Vec<AgentMessageInputContent>,
     },
     Reasoning {
         #[serde(default, skip_serializing)]
@@ -1053,7 +1064,10 @@ impl ResponseItem {
             | Self::WebSearchCall { id, .. }
             | Self::Compaction { id, .. } => id.as_deref(),
             Self::Reasoning { id, .. } | Self::ImageGenerationCall { id, .. } => Some(id),
-            Self::CompactionTrigger | Self::ContextCompaction { .. } | Self::Other => None,
+            Self::AgentMessage { .. }
+            | Self::CompactionTrigger
+            | Self::ContextCompaction { .. }
+            | Self::Other => None,
         }
     }
 
