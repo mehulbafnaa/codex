@@ -9452,6 +9452,7 @@ async fn create_thread_goal_fills_empty_thread_preview() -> anyhow::Result<()> {
                 sort_key: codex_state::SortKey::UpdatedAt,
                 sort_direction: codex_state::SortDirection::Desc,
                 search_term: None,
+                parent_thread_id: None,
             },
         )
         .await?;
@@ -9478,6 +9479,7 @@ async fn create_thread_goal_fills_empty_thread_preview() -> anyhow::Result<()> {
                 sort_key: codex_state::SortKey::UpdatedAt,
                 sort_direction: codex_state::SortDirection::Desc,
                 search_term: None,
+                parent_thread_id: None,
             },
         )
         .await?;
