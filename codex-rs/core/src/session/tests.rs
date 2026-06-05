@@ -8961,7 +8961,7 @@ async fn try_start_turn_if_idle_rejects_active_turn_without_injecting() {
         .expect_err("active turn should reject idle-only input");
 
     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
-    assert_eq!(vec![item], err.into_input());
+    assert_turn_inputs_eq_ignoring_response_item_ids(err.into_input(), vec![item]);
     assert_eq!(
         Vec::<TurnInput>::new(),
         sess.input_queue.get_pending_input(&sess.active_turn).await
@@ -8987,7 +8987,7 @@ async fn try_start_turn_if_idle_rejects_plan_mode_without_injecting() {
         .expect_err("plan mode should reject automatic idle input");
 
     assert_eq!(TryStartTurnIfIdleRejectionReason::PlanMode, err.reason());
-    assert_eq!(vec![item], err.into_input());
+    assert_turn_inputs_eq_ignoring_response_item_ids(err.into_input(), vec![item]);
     assert!(sess.active_turn.lock().await.is_none());
     assert_eq!(
         Vec::<TurnInput>::new(),
@@ -9018,7 +9018,7 @@ async fn try_start_turn_if_idle_rejects_pending_trigger_turn_without_injecting()
         TryStartTurnIfIdleRejectionReason::PendingTriggerTurn,
         err.reason()
     );
-    assert_eq!(vec![item], err.into_input());
+    assert_turn_inputs_eq_ignoring_response_item_ids(err.into_input(), vec![item]);
     assert!(sess.active_turn.lock().await.is_none());
     assert!(sess.input_queue.has_trigger_turn_mailbox_items().await);
 }
@@ -9043,7 +9043,7 @@ async fn try_start_turn_if_idle_rejects_active_review_turn_without_injecting() {
         .expect_err("active review turn should reject automatic idle input");
 
     assert_eq!(TryStartTurnIfIdleRejectionReason::Busy, err.reason());
-    assert_eq!(vec![item], err.into_input());
+    assert_turn_inputs_eq_ignoring_response_item_ids(err.into_input(), vec![item]);
     assert_eq!(
         Vec::<TurnInput>::new(),
         sess.input_queue.get_pending_input(&sess.active_turn).await

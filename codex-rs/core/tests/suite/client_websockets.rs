@@ -1579,8 +1579,11 @@ async fn responses_websocket_openai_incremental_create_sends_delta_item_id() {
     ]])
     .await;
 
-    let harness =
-        websocket_harness_with_provider_options(openai_websocket_provider(&server), false).await;
+    let harness = websocket_harness_with_provider_options(
+        openai_websocket_provider(&server),
+        /*runtime_metrics_enabled*/ false,
+    )
+    .await;
     let mut session = harness.client.new_session();
     let prompt_one = prompt_with_input(vec![message_item_with_id("msg_user_1", "hello")]);
     let prompt_two = prompt_with_input(vec![
@@ -1617,8 +1620,11 @@ async fn responses_websocket_openai_full_create_replays_item_ids() {
     ]])
     .await;
 
-    let harness =
-        websocket_harness_with_provider_options(openai_websocket_provider(&server), false).await;
+    let harness = websocket_harness_with_provider_options(
+        openai_websocket_provider(&server),
+        /*runtime_metrics_enabled*/ false,
+    )
+    .await;
     let mut session = harness.client.new_session();
     let prompt_one = prompt_with_input_and_instructions(
         vec![message_item_with_id("msg_user_1", "hello")],
