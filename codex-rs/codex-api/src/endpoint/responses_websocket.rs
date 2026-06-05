@@ -229,7 +229,8 @@ impl ResponsesWebsocketConnection {
         let mut request_body = serde_json::to_value(&request).map_err(|err| {
             ApiError::Stream(format!("failed to encode websocket request: {err}"))
         })?;
-        if include_item_ids && let ResponsesWsRequest::ResponseCreate(request) = &request {
+        if include_item_ids {
+            let ResponsesWsRequest::ResponseCreate(request) = &request;
             attach_all_response_item_ids_to_input(&mut request_body, &request.input);
         }
 
