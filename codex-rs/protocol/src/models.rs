@@ -1305,14 +1305,14 @@ impl From<ResponseInputItem> for ResponseItem {
                 role,
                 content,
                 id: client_generated_response_item_id(
-                    None,
+                    /*id*/ None,
                     ClientGeneratedResponseItemIdKind::Message,
                 ),
                 phase,
             },
             ResponseInputItem::FunctionCallOutput { call_id, output } => Self::FunctionCallOutput {
                 id: client_generated_response_item_id(
-                    None,
+                    /*id*/ None,
                     ClientGeneratedResponseItemIdKind::FunctionCallOutput,
                 ),
                 call_id,
@@ -1322,7 +1322,7 @@ impl From<ResponseInputItem> for ResponseItem {
                 let output = output.into_function_call_output_payload();
                 Self::FunctionCallOutput {
                     id: client_generated_response_item_id(
-                        None,
+                        /*id*/ None,
                         ClientGeneratedResponseItemIdKind::FunctionCallOutput,
                     ),
                     call_id,
@@ -1335,7 +1335,7 @@ impl From<ResponseInputItem> for ResponseItem {
                 output,
             } => Self::CustomToolCallOutput {
                 id: client_generated_response_item_id(
-                    None,
+                    /*id*/ None,
                     ClientGeneratedResponseItemIdKind::CustomToolCallOutput,
                 ),
                 call_id,
@@ -1349,7 +1349,7 @@ impl From<ResponseInputItem> for ResponseItem {
                 tools,
             } => Self::ToolSearchOutput {
                 id: client_generated_response_item_id(
-                    None,
+                    /*id*/ None,
                     ClientGeneratedResponseItemIdKind::ToolSearchOutput,
                 ),
                 call_id: Some(call_id),
