@@ -8,6 +8,8 @@ use crate::app_event::AppEvent;
 use crate::app_event::PluginLocation;
 use crate::app_event::PluginRemoteSectionError;
 use crate::bottom_pane::ColumnWidthMode;
+use crate::bottom_pane::SELECTION_TOGGLE_BLOCKED_PREFIX;
+use crate::bottom_pane::SELECTION_TOGGLE_UNAVAILABLE_PREFIX;
 use crate::bottom_pane::SelectionAction;
 use crate::bottom_pane::SelectionItem;
 use crate::bottom_pane::SelectionRowDisplay;
@@ -1603,7 +1605,7 @@ impl ChatWidget {
         let total = all_entries.len();
         let installed = all_entries
             .iter()
-            .filter(|(_, plugin, _)| plugin.installed)
+            .filter(|(_, plugin, _)| plugin_shows_as_installed(plugin))
             .count();
         let name_column_width = all_entries
             .iter()
@@ -1614,7 +1616,7 @@ impl ChatWidget {
             .max();
         let installed_entries = all_entries
             .iter()
-            .filter(|(_, plugin, _)| plugin.installed)
+            .filter(|(_, plugin, _)| plugin_shows_as_installed(plugin))
             .cloned()
             .collect();
 
@@ -1664,7 +1666,7 @@ impl ChatWidget {
         let curated_total = curated_entries.len();
         let curated_installed = curated_entries
             .iter()
-            .filter(|(_, plugin, _)| plugin.installed)
+            .filter(|(_, plugin, _)| plugin_shows_as_installed(plugin))
             .count();
         let curated_has_entries = !curated_entries.is_empty();
         let by_openai_section_error = self
@@ -1802,7 +1804,7 @@ impl ChatWidget {
             let marketplace_total = entries.len();
             let marketplace_installed = entries
                 .iter()
-                .filter(|(_, plugin, _)| plugin.installed)
+                .filter(|(_, plugin, _)| plugin_shows_as_installed(plugin))
                 .count();
             let tab_id = marketplace_tab_id(marketplace);
             let can_remove_marketplace =
@@ -2035,6 +2037,13 @@ impl ChatWidget {
                 is_disabled: true,
                 ..Default::default()
             });
+        } else if plugin.summary.install_policy == PluginInstallPolicy::InstalledByDefault {
+            items.push(SelectionItem {
+                name: "Installed by admin".to_string(),
+                description: Some("This plugin is installed by your workspace admin.".to_string()),
+                is_disabled: true,
+                ..Default::default()
+            });
         } else if plugin.summary.install_policy == PluginInstallPolicy::NotAvailable {
             items.push(SelectionItem {
                 name: "Install plugin".to_string(),
@@ -2138,8 +2147,9 @@ impl ChatWidget {
             let plugin_detail_request =
                 plugin_detail_request_for_entry(marketplace, plugin, preferred_local_sources);
             let can_view_details = plugin_detail_request.is_some();
+            let shows_as_installed = plugin_shows_as_installed(plugin);
             let can_toggle_plugin =
-                plugin.installed && plugin.availability != PluginAvailability::DisabledByAdmin;
+                shows_as_installed && plugin.availability != PluginAvailability::DisabledByAdmin;
             let selected_status_label = format!("{status_label:<status_label_width$}");
             let selected_description = if can_toggle_plugin {
                 let toggle_action = if plugin.enabled { "disable" } else { "enable" };
@@ -2150,9 +2160,14 @@ impl ChatWidget {
                 } else {
                     format!("{selected_status_label}   Space to {toggle_action}.")
                 }
-            } else if plugin.installed && can_view_details {
+            } else if plugin.availability == PluginAvailability::DisabledByAdmin && can_view_details
+            {
                 format!("{selected_status_label}   Press Enter to view plugin details.")
-            } else if plugin.installed {
+            } else if plugin.availability == PluginAvailability::DisabledByAdmin {
+                format!("{selected_status_label}   Plugin details are unavailable.")
+            } else if shows_as_installed && can_view_details {
+                format!("{selected_status_label}   Press Enter to view plugin details.")
+            } else if shows_as_installed {
                 format!("{selected_status_label}   Plugin details are unavailable.")
             } else if can_view_details {
                 format!("{selected_status_label}   Press Enter to install or view plugin details.")
@@ -2201,13 +2216,19 @@ impl ChatWidget {
                 } else {
                     Vec::new()
                 };
-            let is_disabled = !can_view_details && !plugin.installed;
+            let is_disabled = !can_view_details && !shows_as_installed;
             let disabled_reason = is_disabled.then(|| "plugin details are unavailable".to_string());
 
             items.push(SelectionItem {
                 name: display_name,
                 toggle,
-                toggle_placeholder: (!plugin.installed).then_some("[-] "),
+                toggle_placeholder: if plugin.availability == PluginAvailability::DisabledByAdmin {
+                    Some(SELECTION_TOGGLE_BLOCKED_PREFIX)
+                } else if can_toggle_plugin {
+                    None
+                } else {
+                    Some(SELECTION_TOGGLE_UNAVAILABLE_PREFIX)
+                },
                 description: Some(description),
                 selected_description: Some(selected_description),
                 search_value: Some(search_value),
@@ -2398,8 +2419,10 @@ fn plugin_entry_preferred(
         return candidate_is_local_share;
     }
 
-    if candidate.1.installed != existing.1.installed {
-        return candidate.1.installed;
+    let candidate_shows_as_installed = plugin_shows_as_installed(candidate.1);
+    let existing_shows_as_installed = plugin_shows_as_installed(existing.1);
+    if candidate_shows_as_installed != existing_shows_as_installed {
+        return candidate_shows_as_installed;
     }
 
     !matches!(candidate.1.source, PluginSource::Remote)
@@ -2408,10 +2431,8 @@ fn plugin_entry_preferred(
 
 fn sort_plugin_entries(entries: &mut [(&PluginMarketplaceEntry, &PluginSummary, String)]) {
     entries.sort_by(|left, right| {
-        right
-            .1
-            .installed
-            .cmp(&left.1.installed)
+        plugin_shows_as_installed(right.1)
+            .cmp(&plugin_shows_as_installed(left.1))
             .then_with(|| {
                 left.2
                     .to_ascii_lowercase()
@@ -2697,9 +2718,9 @@ fn plugin_brief_description_without_marketplace(
 
 fn plugin_status_label(plugin: &PluginSummary) -> &'static str {
     if plugin.availability == PluginAvailability::DisabledByAdmin {
-        return "Disabled by admin";
+        return "Disabled";
     }
-    if plugin.installed {
+    if plugin_shows_as_installed(plugin) {
         if plugin.enabled {
             "Installed"
         } else {
@@ -2709,7 +2730,7 @@ fn plugin_status_label(plugin: &PluginSummary) -> &'static str {
         match plugin.install_policy {
             PluginInstallPolicy::NotAvailable => "Not installable",
             PluginInstallPolicy::Available => "Available",
-            PluginInstallPolicy::InstalledByDefault => "Available by default",
+            PluginInstallPolicy::InstalledByDefault => "Installed",
         }
     }
 }
@@ -2717,6 +2738,9 @@ fn plugin_status_label(plugin: &PluginSummary) -> &'static str {
 fn plugin_detail_status_label(plugin: &PluginSummary) -> &'static str {
     if plugin.availability == PluginAvailability::DisabledByAdmin {
         return "Disabled by admin";
+    }
+    if plugin.install_policy == PluginInstallPolicy::InstalledByDefault {
+        return "Installed by admin";
     }
     if plugin.installed {
         if plugin.enabled {
@@ -2728,9 +2752,13 @@ fn plugin_detail_status_label(plugin: &PluginSummary) -> &'static str {
         match plugin.install_policy {
             PluginInstallPolicy::NotAvailable => "Not installable",
             PluginInstallPolicy::Available => "Can be installed",
-            PluginInstallPolicy::InstalledByDefault => "Available by default",
+            PluginInstallPolicy::InstalledByDefault => "Installed by admin",
         }
     }
+}
+
+fn plugin_shows_as_installed(plugin: &PluginSummary) -> bool {
+    plugin.installed || plugin.install_policy == PluginInstallPolicy::InstalledByDefault
 }
 
 fn plugin_location_for_marketplace(
