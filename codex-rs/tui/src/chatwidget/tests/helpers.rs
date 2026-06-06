@@ -1500,6 +1500,7 @@ pub(super) fn plugins_test_remote_detail(
         skills: Vec::new(),
         hooks: Vec::new(),
         apps: Vec::new(),
+        app_templates: Vec::new(),
         mcp_servers: Vec::new(),
     }
 }
